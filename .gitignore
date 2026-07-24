@@ -1,0 +1,41 @@
+# Unreal Engine generated directories
+**/Binaries/
+**/DerivedDataCache/
+**/Intermediate/
+**/Saved/
+
+# Unreal local developer content
+**/Content/Developers/
+
+# Visual Studio and IDE-generated files
+**/.vs/
+**/.vscode/
+*.sln
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+*.user
+.vsconfig
+
+# Local backups and upgrade reports
+**/Backup/
+**/UpgradeLog*.htm
+
+# Build and crash artifacts outside standard generated directories
+*.log
+*.pdb
+*.obj
+*.dll
+*.exp
+*.lib
+*.ilk
+*.tmp
+*.bak
+*.runtime-xml
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
