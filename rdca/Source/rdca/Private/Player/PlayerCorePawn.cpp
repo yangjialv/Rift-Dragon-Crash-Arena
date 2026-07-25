@@ -12,6 +12,8 @@
 #include "InputAction.h"
 #include "InputActionValue.h"
 #include "InputMappingContext.h"
+#include "Player/PhaseCrashComponent.h"
+#include "rdca.h"
 #include "UObject/ConstructorHelpers.h"
 
 APlayerCorePawn::APlayerCorePawn()
@@ -49,6 +51,8 @@ APlayerCorePawn::APlayerCorePawn()
 	MovementComponent->MaxSpeed = MoveSpeed;
 	MovementComponent->Acceleration = 4000.0f;
 	MovementComponent->Deceleration = 5000.0f;
+
+	PhaseCrashComponent = CreateDefaultSubobject<UPhaseCrashComponent>(TEXT("PhaseCrash"));
 }
 
 void APlayerCorePawn::BeginPlay()
@@ -73,7 +77,7 @@ void APlayerCorePawn::BeginPlay()
 	}
 	else if (!PlayerMappingContext)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("PlayerCorePawn: PlayerMappingContext is not assigned."));
+		UE_LOG(LogRDCAPlayer, Warning, TEXT("PlayerCorePawn: PlayerMappingContext is not assigned."));
 	}
 }
 
@@ -94,13 +98,65 @@ void APlayerCorePawn::SetupPlayerInputComponent(UInputComponent* PlayerInputComp
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("PlayerCorePawn: MoveAction is not assigned."));
+		UE_LOG(LogRDCAPlayer, Warning, TEXT("PlayerCorePawn: MoveAction is not assigned."));
+	}
+
+	if (CrashAction)
+	{
+		EnhancedInputComponent->BindAction(
+			CrashAction,
+			ETriggerEvent::Started,
+			this,
+			&APlayerCorePawn::StartCrashCharge);
+		EnhancedInputComponent->BindAction(
+			CrashAction,
+			ETriggerEvent::Completed,
+			this,
+			&APlayerCorePawn::ReleaseCrash);
+		EnhancedInputComponent->BindAction(
+			CrashAction,
+			ETriggerEvent::Canceled,
+			this,
+			&APlayerCorePawn::CancelCrashCharge);
+	}
+	else
+	{
+		UE_LOG(LogRDCAPlayer, Warning, TEXT("PlayerCorePawn: CrashAction is not assigned."));
 	}
 }
 
 void APlayerCorePawn::Move(const FInputActionValue& Value)
 {
 	const FVector2D MovementInput = Value.Get<FVector2D>();
-	AddMovementInput(FVector::ForwardVector, MovementInput.Y);
-	AddMovementInput(FVector::RightVector, MovementInput.X);
+	const float InputScale = PhaseCrashComponent
+		? PhaseCrashComponent->GetMovementInputScale()
+		: 1.0f;
+	AddMovementInput(FVector::ForwardVector, MovementInput.Y * InputScale);
+	AddMovementInput(FVector::RightVector, MovementInput.X * InputScale);
+}
+
+void APlayerCorePawn::StartCrashCharge()
+{
+	if (PhaseCrashComponent)
+	{
+		MovementComponent->StopMovementImmediately();
+		PhaseCrashComponent->StartCharging();
+	}
+}
+
+void APlayerCorePawn::ReleaseCrash()
+{
+	if (PhaseCrashComponent)
+	{
+		MovementComponent->StopMovementImmediately();
+		PhaseCrashComponent->ReleaseCrash();
+	}
+}
+
+void APlayerCorePawn::CancelCrashCharge()
+{
+	if (PhaseCrashComponent)
+	{
+		PhaseCrashComponent->CancelCharging();
+	}
 }
