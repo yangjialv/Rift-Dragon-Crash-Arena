@@ -151,7 +151,8 @@ void APlayerCorePawn::Move(const FInputActionValue& Value)
 void APlayerCorePawn::StartCrashCharge()
 {
 	if (PhaseCrashComponent
-		&& PhaseCrashComponent->GetCrashState() == EPhaseCrashState::Ready)
+		&& (PhaseCrashComponent->GetCrashState() == EPhaseCrashState::Ready
+			|| PhaseCrashComponent->GetCrashState() == EPhaseCrashState::Attached))
 	{
 		MovementComponent->StopMovementImmediately();
 		PhaseCrashComponent->StartCharging();
@@ -178,7 +179,8 @@ void APlayerCorePawn::CancelCrashCharge()
 void APlayerCorePawn::StartGroundDash()
 {
 	if (PhaseCrashComponent
-		&& PhaseCrashComponent->GetCrashState() == EPhaseCrashState::Ready)
+		&& (PhaseCrashComponent->GetCrashState() == EPhaseCrashState::Ready
+			|| PhaseCrashComponent->GetCrashState() == EPhaseCrashState::Attached))
 	{
 		MovementComponent->StopMovementImmediately();
 		PhaseCrashComponent->StartGroundDash();

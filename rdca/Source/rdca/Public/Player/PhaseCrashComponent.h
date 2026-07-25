@@ -5,6 +5,8 @@
 #include "PhaseCrashComponent.generated.h"
 
 class APawn;
+class AActor;
+class UCrashResponseComponent;
 
 UENUM(BlueprintType)
 enum class EPhaseCrashState : uint8
@@ -13,7 +15,8 @@ enum class EPhaseCrashState : uint8
 	Charging,
 	Crashing,
 	Recovery,
-	Cooldown
+	Cooldown,
+	Attached
 };
 
 UENUM(BlueprintType)
@@ -72,6 +75,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Phase Crash")
 	float GetMovementInputScale() const;
+
+	UFUNCTION(BlueprintPure, Category = "Phase Crash")
+	bool IsAttached() const { return CrashState == EPhaseCrashState::Attached; }
 
 	UPROPERTY(BlueprintAssignable, Category = "Phase Crash")
 	FOnPhaseCrashStateChanged OnCrashStateChanged;
@@ -160,11 +166,24 @@ private:
 	void TickRecovery(float DeltaTime);
 	void TickCooldown(float DeltaTime);
 	void FinishCrash();
+	void HandleCrashImpact(const FHitResult& Hit, const FVector& IncomingDirection);
+	void HandleAttachImpact(AActor* TargetActor, const FHitResult& Hit);
+	void HandleReboundImpact(
+		AActor* TargetActor,
+		const FHitResult& Hit,
+		const FVector& IncomingDirection,
+		const UCrashResponseComponent& ResponseComponent);
+	void AddTemporaryMoveIgnore(AActor* TargetActor);
+	void ClearTemporaryMoveIgnores();
+	void DetachFromCrashTarget();
 	void SetCrashState(EPhaseCrashState NewState);
 
 	TObjectPtr<APawn> OwnerPawn;
+	TWeakObjectPtr<AActor> AttachedActor;
+	TArray<TWeakObjectPtr<AActor>> TemporarilyIgnoredActors;
 
 	EPhaseCrashState CrashState = EPhaseCrashState::Ready;
+	bool bChargingFromAttachment = false;
 	FVector AimTarget = FVector::ZeroVector;
 	FVector CrashStart = FVector::ZeroVector;
 	FVector CrashEnd = FVector::ZeroVector;

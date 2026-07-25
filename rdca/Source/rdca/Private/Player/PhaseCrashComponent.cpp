@@ -1,5 +1,7 @@
 #include "Player/PhaseCrashComponent.h"
 
+#include "Combat/CrashResponseComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "DrawDebugHelpers.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
@@ -21,6 +23,8 @@ const TCHAR* LexToString(const EPhaseCrashState State)
 		return TEXT("Recovery");
 	case EPhaseCrashState::Cooldown:
 		return TEXT("Cooldown");
+	case EPhaseCrashState::Attached:
+		return TEXT("Attached");
 	default:
 		return TEXT("Unknown");
 	}
@@ -82,7 +86,9 @@ void UPhaseCrashComponent::TickComponent(
 		break;
 	}
 
-	if (CrashState != EPhaseCrashState::Crashing)
+	if (CrashState != EPhaseCrashState::Crashing
+		&& CrashState != EPhaseCrashState::Attached
+		&& !bChargingFromAttachment)
 	{
 		ApplyGravity(DeltaTime);
 	}
@@ -90,11 +96,14 @@ void UPhaseCrashComponent::TickComponent(
 
 void UPhaseCrashComponent::StartCharging()
 {
-	if (CrashState != EPhaseCrashState::Ready || !OwnerPawn)
+	if ((CrashState != EPhaseCrashState::Ready
+			&& CrashState != EPhaseCrashState::Attached)
+		|| !OwnerPawn)
 	{
 		return;
 	}
 
+	bChargingFromAttachment = CrashState == EPhaseCrashState::Attached;
 	ChargeElapsed = 0.0f;
 	UpdateAimTarget();
 	SetCrashState(EPhaseCrashState::Charging);
@@ -115,6 +124,9 @@ void UPhaseCrashComponent::ReleaseCrash()
 		return;
 	}
 
+	DetachFromCrashTarget();
+	bChargingFromAttachment = false;
+	ClearTemporaryMoveIgnores();
 	CrashElapsed = 0.0f;
 	VerticalVelocity = 0.0f;
 	ActiveCooldownDuration = CooldownDuration;
@@ -133,13 +145,21 @@ void UPhaseCrashComponent::CancelCharging()
 {
 	if (CrashState == EPhaseCrashState::Charging)
 	{
-		SetCrashState(EPhaseCrashState::Ready);
+		const bool bReturnToAttachment =
+			bChargingFromAttachment && AttachedActor.IsValid();
+		bChargingFromAttachment = false;
+		SetCrashState(
+			bReturnToAttachment
+				? EPhaseCrashState::Attached
+				: EPhaseCrashState::Ready);
 	}
 }
 
 void UPhaseCrashComponent::StartGroundDash()
 {
-	if (CrashState != EPhaseCrashState::Ready || !OwnerPawn)
+	if ((CrashState != EPhaseCrashState::Ready
+			&& CrashState != EPhaseCrashState::Attached)
+		|| !OwnerPawn)
 	{
 		return;
 	}
@@ -149,6 +169,8 @@ void UPhaseCrashComponent::StartGroundDash()
 		return;
 	}
 
+	DetachFromCrashTarget();
+	ClearTemporaryMoveIgnores();
 	CrashStart = OwnerPawn->GetActorLocation();
 	FVector DashDirection = AimTarget - CrashStart;
 	DashDirection.Z = 0.0f;
@@ -200,6 +222,7 @@ float UPhaseCrashComponent::GetMovementInputScale() const
 		return ChargingMovementScale;
 	case EPhaseCrashState::Crashing:
 	case EPhaseCrashState::Recovery:
+	case EPhaseCrashState::Attached:
 		return 0.0f;
 	default:
 		return 1.0f;
@@ -376,21 +399,16 @@ void UPhaseCrashComponent::TickCrash(const float DeltaTime)
 	const FVector TargetLocation = EvaluateTrajectory(NormalizedTime);
 
 	FHitResult Hit;
+	const FVector MovementDelta = TargetLocation - OwnerPawn->GetActorLocation();
 	OwnerPawn->GetRootComponent()->MoveComponent(
-		TargetLocation - OwnerPawn->GetActorLocation(),
+		MovementDelta,
 		OwnerPawn->GetActorRotation(),
 		true,
 		&Hit);
 
 	if (Hit.IsValidBlockingHit())
 	{
-		UE_LOG(
-			LogRDCAPlayer,
-			Log,
-			TEXT("Phase crash blocked. Point=%s Normal=%s"),
-			*Hit.ImpactPoint.ToCompactString(),
-			*Hit.ImpactNormal.ToCompactString());
-		FinishCrash();
+		HandleCrashImpact(Hit, MovementDelta.GetSafeNormal());
 		return;
 	}
 
@@ -448,6 +466,7 @@ void UPhaseCrashComponent::TickCooldown(const float DeltaTime)
 
 void UPhaseCrashComponent::FinishCrash()
 {
+	ClearTemporaryMoveIgnores();
 	CrashElapsed = 0.0f;
 	CrashDuration = 0.0f;
 	RecoveryRemaining = RecoveryDuration;
@@ -464,6 +483,179 @@ void UPhaseCrashComponent::FinishCrash()
 			SetCrashState(EPhaseCrashState::Ready);
 		}
 	}
+}
+
+void UPhaseCrashComponent::HandleCrashImpact(
+	const FHitResult& Hit,
+	const FVector& IncomingDirection)
+{
+	AActor* TargetActor = Hit.GetActor();
+	UCrashResponseComponent* ResponseComponent =
+		TargetActor
+			? TargetActor->FindComponentByClass<UCrashResponseComponent>()
+			: nullptr;
+	const ECrashCollisionResponse Response =
+		ResponseComponent
+			? ResponseComponent->GetResponse()
+			: ECrashCollisionResponse::Block;
+
+	if (ResponseComponent)
+	{
+		ResponseComponent->NotifyCrashImpact(OwnerPawn, Hit);
+	}
+
+	UE_LOG(
+		LogRDCAPlayer,
+		Log,
+		TEXT("Crash impact. Target=%s Response=%d Point=%s Incoming=%s Normal=%s"),
+		*GetNameSafe(TargetActor),
+		static_cast<int32>(Response),
+		*Hit.ImpactPoint.ToCompactString(),
+		*IncomingDirection.ToCompactString(),
+		*Hit.ImpactNormal.ToCompactString());
+
+	switch (Response)
+	{
+	case ECrashCollisionResponse::Attach:
+		HandleAttachImpact(TargetActor, Hit);
+		break;
+
+	case ECrashCollisionResponse::Rebound:
+		if (TargetActor && ResponseComponent)
+		{
+			HandleReboundImpact(
+				TargetActor,
+				Hit,
+				IncomingDirection,
+				*ResponseComponent);
+		}
+		else
+		{
+			FinishCrash();
+		}
+		break;
+
+	case ECrashCollisionResponse::Ignore:
+		if (TargetActor)
+		{
+			AddTemporaryMoveIgnore(TargetActor);
+		}
+		else
+		{
+			FinishCrash();
+		}
+		break;
+
+	case ECrashCollisionResponse::Block:
+	default:
+		FinishCrash();
+		break;
+	}
+}
+
+void UPhaseCrashComponent::HandleAttachImpact(
+	AActor* TargetActor,
+	const FHitResult& Hit)
+{
+	ClearTemporaryMoveIgnores();
+	CrashElapsed = 0.0f;
+	CrashDuration = 0.0f;
+	VerticalVelocity = 0.0f;
+	AttachedActor = TargetActor;
+
+	if (TargetActor)
+	{
+		OwnerPawn->AttachToActor(
+			TargetActor,
+			FAttachmentTransformRules::KeepWorldTransform);
+	}
+
+	SetCrashState(EPhaseCrashState::Attached);
+	UE_LOG(
+		LogRDCAPlayer,
+		Log,
+		TEXT("Attached to crash target. Target=%s Point=%s"),
+		*GetNameSafe(TargetActor),
+		*Hit.ImpactPoint.ToCompactString());
+}
+
+void UPhaseCrashComponent::HandleReboundImpact(
+	AActor* TargetActor,
+	const FHitResult& Hit,
+	const FVector& IncomingDirection,
+	const UCrashResponseComponent& ResponseComponent)
+{
+	FVector ReboundDirection = FMath::GetReflectionVector(
+		IncomingDirection,
+		Hit.ImpactNormal.GetSafeNormal());
+	const float MaximumZ = ResponseComponent.GetMaximumReboundZRatio();
+	ReboundDirection.Z = FMath::Clamp(ReboundDirection.Z, -MaximumZ, MaximumZ);
+
+	if (!ReboundDirection.Normalize())
+	{
+		FinishCrash();
+		return;
+	}
+
+	AddTemporaryMoveIgnore(TargetActor);
+	CrashStart = OwnerPawn->GetActorLocation();
+	CrashEnd =
+		CrashStart
+		+ ReboundDirection * ResponseComponent.GetReboundDistance();
+	ActiveArcHeight = 0.0f;
+	CrashElapsed = 0.0f;
+	CrashDuration = FMath::Max(
+		ResponseComponent.GetReboundDistance()
+			/ FMath::Max(ResponseComponent.GetReboundSpeed(), 1.0f),
+		MinimumFlightDuration);
+
+	UE_LOG(
+		LogRDCAPlayer,
+		Log,
+		TEXT("Crash rebound. Direction=%s Distance=%.1f"),
+		*ReboundDirection.ToCompactString(),
+		ResponseComponent.GetReboundDistance());
+}
+
+void UPhaseCrashComponent::AddTemporaryMoveIgnore(AActor* TargetActor)
+{
+	UPrimitiveComponent* RootPrimitive =
+		Cast<UPrimitiveComponent>(OwnerPawn ? OwnerPawn->GetRootComponent() : nullptr);
+	if (!RootPrimitive || !TargetActor
+		|| TemporarilyIgnoredActors.Contains(TargetActor))
+	{
+		return;
+	}
+
+	RootPrimitive->IgnoreActorWhenMoving(TargetActor, true);
+	TemporarilyIgnoredActors.Add(TargetActor);
+}
+
+void UPhaseCrashComponent::ClearTemporaryMoveIgnores()
+{
+	UPrimitiveComponent* RootPrimitive =
+		Cast<UPrimitiveComponent>(OwnerPawn ? OwnerPawn->GetRootComponent() : nullptr);
+	if (RootPrimitive)
+	{
+		for (const TWeakObjectPtr<AActor>& IgnoredActor : TemporarilyIgnoredActors)
+		{
+			if (IgnoredActor.IsValid())
+			{
+				RootPrimitive->IgnoreActorWhenMoving(IgnoredActor.Get(), false);
+			}
+		}
+	}
+
+	TemporarilyIgnoredActors.Reset();
+}
+
+void UPhaseCrashComponent::DetachFromCrashTarget()
+{
+	if (OwnerPawn && OwnerPawn->GetAttachParentActor())
+	{
+		OwnerPawn->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+	}
+	AttachedActor.Reset();
 }
 
 void UPhaseCrashComponent::SetCrashState(const EPhaseCrashState NewState)
