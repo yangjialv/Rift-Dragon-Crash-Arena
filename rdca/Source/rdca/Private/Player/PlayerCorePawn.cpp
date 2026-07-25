@@ -123,6 +123,19 @@ void APlayerCorePawn::SetupPlayerInputComponent(UInputComponent* PlayerInputComp
 	{
 		UE_LOG(LogRDCAPlayer, Warning, TEXT("PlayerCorePawn: CrashAction is not assigned."));
 	}
+
+	if (DashAction)
+	{
+		EnhancedInputComponent->BindAction(
+			DashAction,
+			ETriggerEvent::Started,
+			this,
+			&APlayerCorePawn::StartGroundDash);
+	}
+	else
+	{
+		UE_LOG(LogRDCAPlayer, Warning, TEXT("PlayerCorePawn: DashAction is not assigned."));
+	}
 }
 
 void APlayerCorePawn::Move(const FInputActionValue& Value)
@@ -137,7 +150,8 @@ void APlayerCorePawn::Move(const FInputActionValue& Value)
 
 void APlayerCorePawn::StartCrashCharge()
 {
-	if (PhaseCrashComponent)
+	if (PhaseCrashComponent
+		&& PhaseCrashComponent->GetCrashState() == EPhaseCrashState::Ready)
 	{
 		MovementComponent->StopMovementImmediately();
 		PhaseCrashComponent->StartCharging();
@@ -158,5 +172,15 @@ void APlayerCorePawn::CancelCrashCharge()
 	if (PhaseCrashComponent)
 	{
 		PhaseCrashComponent->CancelCharging();
+	}
+}
+
+void APlayerCorePawn::StartGroundDash()
+{
+	if (PhaseCrashComponent
+		&& PhaseCrashComponent->GetCrashState() == EPhaseCrashState::Ready)
+	{
+		MovementComponent->StopMovementImmediately();
+		PhaseCrashComponent->StartGroundDash();
 	}
 }

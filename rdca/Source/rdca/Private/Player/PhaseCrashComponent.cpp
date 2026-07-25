@@ -62,9 +62,7 @@ void UPhaseCrashComponent::TickComponent(
 		UpdateAimTarget();
 		if (bDrawDebugAim && GetWorld())
 		{
-			const FVector Start = OwnerPawn->GetActorLocation();
-			DrawDebugLine(GetWorld(), Start, AimTarget, FColor::Cyan, false, 0.0f, 0, 3.0f);
-			DrawDebugSphere(GetWorld(), AimTarget, 30.0f, 12, FColor::Cyan, false, 0.0f);
+			DrawTrajectoryPreview();
 		}
 		break;
 
@@ -82,6 +80,11 @@ void UPhaseCrashComponent::TickComponent(
 
 	default:
 		break;
+	}
+
+	if (CrashState != EPhaseCrashState::Crashing)
+	{
+		ApplyGravity(DeltaTime);
 	}
 }
 
@@ -106,27 +109,24 @@ void UPhaseCrashComponent::ReleaseCrash()
 
 	UpdateAimTarget();
 
-	CrashDirection = AimTarget - OwnerPawn->GetActorLocation();
-	CrashDirection.Z = 0.0f;
-
-	if (!CrashDirection.Normalize())
+	if (!CalculateTrajectory(CrashStart, CrashEnd, ActiveArcHeight, CrashDuration))
 	{
 		CancelCharging();
 		return;
 	}
 
-	CrashDistanceRemaining = FMath::Lerp(
-		MinCrashDistance,
-		MaxCrashDistance,
-		GetChargeAlpha());
-
+	CrashElapsed = 0.0f;
+	VerticalVelocity = 0.0f;
+	ActiveCooldownDuration = CooldownDuration;
 	SetCrashState(EPhaseCrashState::Crashing);
 	UE_LOG(
 		LogRDCAPlayer,
 		Log,
-		TEXT("Phase crash released. Distance=%.1f Direction=%s"),
-		CrashDistanceRemaining,
-		*CrashDirection.ToCompactString());
+		TEXT("Phase crash released. Arc=%s Distance=%.1f Height=%.1f Duration=%.2f"),
+		GetPredictedArcType() == ECrashArcType::HighArc ? TEXT("High") : TEXT("Low"),
+		FVector::Dist2D(CrashStart, CrashEnd),
+		ActiveArcHeight,
+		CrashDuration);
 }
 
 void UPhaseCrashComponent::CancelCharging()
@@ -137,11 +137,59 @@ void UPhaseCrashComponent::CancelCharging()
 	}
 }
 
+void UPhaseCrashComponent::StartGroundDash()
+{
+	if (CrashState != EPhaseCrashState::Ready || !OwnerPawn)
+	{
+		return;
+	}
+
+	if (!UpdateAimTarget())
+	{
+		return;
+	}
+
+	CrashStart = OwnerPawn->GetActorLocation();
+	FVector DashDirection = AimTarget - CrashStart;
+	DashDirection.Z = 0.0f;
+	const float CursorDistance = DashDirection.Size();
+	if (!DashDirection.Normalize() || CursorDistance <= UE_KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	const float TravelDistance = FMath::Min(CursorDistance, GroundDashDistance);
+	CrashEnd = CrashStart + DashDirection * TravelDistance;
+	CrashEnd.Z = CrashStart.Z;
+	ActiveArcHeight = 0.0f;
+	CrashElapsed = 0.0f;
+	CrashDuration = FMath::Max(
+		TravelDistance / FMath::Max(GroundDashSpeed, 1.0f),
+		MinimumFlightDuration);
+	ActiveCooldownDuration = GroundDashCooldown;
+	VerticalVelocity = 0.0f;
+
+	SetCrashState(EPhaseCrashState::Crashing);
+	UE_LOG(
+		LogRDCAPlayer,
+		Log,
+		TEXT("Ground dash started. Distance=%.1f Duration=%.2f"),
+		TravelDistance,
+		CrashDuration);
+}
+
 float UPhaseCrashComponent::GetChargeAlpha() const
 {
 	return MaxChargeTime > 0.0f
 		? FMath::Clamp(ChargeElapsed / MaxChargeTime, 0.0f, 1.0f)
 		: 1.0f;
+}
+
+ECrashArcType UPhaseCrashComponent::GetPredictedArcType() const
+{
+	return GetChargeAlpha() >= HighArcThreshold
+		? ECrashArcType::HighArc
+		: ECrashArcType::LowArc;
 }
 
 float UPhaseCrashComponent::GetMovementInputScale() const
@@ -212,26 +260,167 @@ bool UPhaseCrashComponent::UpdateAimTarget()
 	return true;
 }
 
+bool UPhaseCrashComponent::CalculateTrajectory(
+	FVector& OutStart,
+	FVector& OutEnd,
+	float& OutArcHeight,
+	float& OutDuration) const
+{
+	if (!OwnerPawn)
+	{
+		return false;
+	}
+
+	OutStart = OwnerPawn->GetActorLocation();
+	FVector HorizontalOffset = AimTarget - OutStart;
+	HorizontalOffset.Z = 0.0f;
+
+	const float CursorDistance = HorizontalOffset.Size();
+	if (CursorDistance <= UE_KINDA_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	const FVector Direction = HorizontalOffset / CursorDistance;
+	const float ChargeAlpha = GetChargeAlpha();
+	const float MaximumChargedDistance = FMath::Lerp(
+		MinCrashDistance,
+		MaxCrashDistance,
+		ChargeAlpha);
+	const float TravelDistance = FMath::Clamp(
+		CursorDistance,
+		FMath::Min(MinCrashDistance, MaximumChargedDistance),
+		MaximumChargedDistance);
+
+	OutEnd = OutStart + Direction * TravelDistance;
+	OutEnd.Z = OutStart.Z;
+	OutArcHeight = FMath::Lerp(MinArcHeight, MaxArcHeight, ChargeAlpha);
+	OutDuration = FMath::Max(
+		TravelDistance / FMath::Max(CrashSpeed, 1.0f),
+		MinimumFlightDuration);
+	return true;
+}
+
+FVector UPhaseCrashComponent::EvaluateTrajectory(const float NormalizedTime) const
+{
+	const float Alpha = FMath::Clamp(NormalizedTime, 0.0f, 1.0f);
+	const float ParabolaOffset = 4.0f * ActiveArcHeight * Alpha * (1.0f - Alpha);
+	return FMath::Lerp(CrashStart, CrashEnd, Alpha) + FVector::UpVector * ParabolaOffset;
+}
+
+void UPhaseCrashComponent::DrawTrajectoryPreview() const
+{
+	if (!GetWorld())
+	{
+		return;
+	}
+
+	FVector PreviewStart;
+	FVector PreviewEnd;
+	float PreviewArcHeight = 0.0f;
+	float PreviewDuration = 0.0f;
+	if (!CalculateTrajectory(
+		PreviewStart,
+		PreviewEnd,
+		PreviewArcHeight,
+		PreviewDuration))
+	{
+		return;
+	}
+
+	const FColor PreviewColor =
+		GetPredictedArcType() == ECrashArcType::HighArc
+			? FColor::Yellow
+			: FColor::Green;
+	constexpr int32 SegmentCount = 20;
+	FVector PreviousPoint = PreviewStart;
+
+	for (int32 SegmentIndex = 1; SegmentIndex <= SegmentCount; ++SegmentIndex)
+	{
+		const float Alpha = static_cast<float>(SegmentIndex) / SegmentCount;
+		const FVector Point =
+			FMath::Lerp(PreviewStart, PreviewEnd, Alpha)
+			+ FVector::UpVector * (4.0f * PreviewArcHeight * Alpha * (1.0f - Alpha));
+		DrawDebugLine(
+			GetWorld(),
+			PreviousPoint,
+			Point,
+			PreviewColor,
+			false,
+			0.0f,
+			0,
+			3.0f);
+		PreviousPoint = Point;
+	}
+
+	DrawDebugSphere(
+		GetWorld(),
+		PreviewEnd,
+		30.0f,
+		12,
+		PreviewColor,
+		false,
+		0.0f);
+}
+
 void UPhaseCrashComponent::TickCrash(const float DeltaTime)
 {
-	const float StepDistance = FMath::Min(CrashSpeed * DeltaTime, CrashDistanceRemaining);
-	if (StepDistance <= UE_KINDA_SMALL_NUMBER)
+	if (!OwnerPawn || CrashDuration <= UE_KINDA_SMALL_NUMBER)
 	{
 		FinishCrash();
 		return;
 	}
 
+	CrashElapsed = FMath::Min(CrashElapsed + DeltaTime, CrashDuration);
+	const float NormalizedTime = CrashElapsed / CrashDuration;
+	const FVector TargetLocation = EvaluateTrajectory(NormalizedTime);
+
 	FHitResult Hit;
 	OwnerPawn->GetRootComponent()->MoveComponent(
-		CrashDirection * StepDistance,
+		TargetLocation - OwnerPawn->GetActorLocation(),
 		OwnerPawn->GetActorRotation(),
 		true,
 		&Hit);
 
-	CrashDistanceRemaining -= StepDistance;
-	if (Hit.IsValidBlockingHit() || CrashDistanceRemaining <= UE_KINDA_SMALL_NUMBER)
+	if (Hit.IsValidBlockingHit())
+	{
+		UE_LOG(
+			LogRDCAPlayer,
+			Log,
+			TEXT("Phase crash blocked. Point=%s Normal=%s"),
+			*Hit.ImpactPoint.ToCompactString(),
+			*Hit.ImpactNormal.ToCompactString());
+		FinishCrash();
+		return;
+	}
+
+	if (CrashElapsed >= CrashDuration)
 	{
 		FinishCrash();
+	}
+}
+
+void UPhaseCrashComponent::ApplyGravity(const float DeltaTime)
+{
+	if (!OwnerPawn || !OwnerPawn->GetRootComponent() || GravityAcceleration <= 0.0f)
+	{
+		return;
+	}
+
+	VerticalVelocity = FMath::Max(
+		VerticalVelocity - GravityAcceleration * DeltaTime,
+		-MaximumFallSpeed);
+
+	FHitResult Hit;
+	OwnerPawn->GetRootComponent()->MoveComponent(
+		FVector(0.0f, 0.0f, VerticalVelocity * DeltaTime),
+		OwnerPawn->GetActorRotation(),
+		true,
+		&Hit);
+
+	if (Hit.IsValidBlockingHit() && VerticalVelocity < 0.0f)
+	{
+		VerticalVelocity = 0.0f;
 	}
 }
 
@@ -240,7 +429,7 @@ void UPhaseCrashComponent::TickRecovery(const float DeltaTime)
 	RecoveryRemaining = FMath::Max(RecoveryRemaining - DeltaTime, 0.0f);
 	if (RecoveryRemaining <= 0.0f)
 	{
-		CooldownRemaining = CooldownDuration;
+		CooldownRemaining = ActiveCooldownDuration;
 		SetCrashState(
 			CooldownRemaining > 0.0f
 				? EPhaseCrashState::Cooldown
@@ -259,7 +448,8 @@ void UPhaseCrashComponent::TickCooldown(const float DeltaTime)
 
 void UPhaseCrashComponent::FinishCrash()
 {
-	CrashDistanceRemaining = 0.0f;
+	CrashElapsed = 0.0f;
+	CrashDuration = 0.0f;
 	RecoveryRemaining = RecoveryDuration;
 	SetCrashState(
 		RecoveryRemaining > 0.0f

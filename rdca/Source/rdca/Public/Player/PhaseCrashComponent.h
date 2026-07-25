@@ -16,6 +16,13 @@ enum class EPhaseCrashState : uint8
 	Cooldown
 };
 
+UENUM(BlueprintType)
+enum class ECrashArcType : uint8
+{
+	LowArc,
+	HighArc
+};
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	FOnPhaseCrashStateChanged,
 	EPhaseCrashState,
@@ -45,6 +52,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Phase Crash")
 	void CancelCharging();
 
+	UFUNCTION(BlueprintCallable, Category = "Phase Crash")
+	void StartGroundDash();
+
 	UFUNCTION(BlueprintPure, Category = "Phase Crash")
 	EPhaseCrashState GetCrashState() const { return CrashState; }
 
@@ -56,6 +66,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Phase Crash")
 	float GetCooldownRemaining() const { return CooldownRemaining; }
+
+	UFUNCTION(BlueprintPure, Category = "Phase Crash")
+	ECrashArcType GetPredictedArcType() const;
 
 	UFUNCTION(BlueprintPure, Category = "Phase Crash")
 	float GetMovementInputScale() const;
@@ -82,6 +95,34 @@ protected:
 		meta = (ClampMin = "1.0"))
 	float CrashSpeed = 2000.0f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Ground Dash",
+		meta = (ClampMin = "0.0"))
+	float GroundDashDistance = 450.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Ground Dash",
+		meta = (ClampMin = "1.0"))
+	float GroundDashSpeed = 3000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Ground Dash",
+		meta = (ClampMin = "0.0"))
+	float GroundDashCooldown = 0.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Trajectory",
+		meta = (ClampMin = "0.0"))
+	float MinArcHeight = 60.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Trajectory",
+		meta = (ClampMin = "0.0"))
+	float MaxArcHeight = 450.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Trajectory",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float HighArcThreshold = 0.55f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Trajectory",
+		meta = (ClampMin = "0.01"))
+	float MinimumFlightDuration = 0.12f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Timing",
 		meta = (ClampMin = "0.0"))
 	float RecoveryDuration = 0.15f;
@@ -97,9 +138,25 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Debug")
 	bool bDrawDebugAim = true;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Gravity",
+		meta = (ClampMin = "0.0"))
+	float GravityAcceleration = 2400.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Gravity",
+		meta = (ClampMin = "0.0"))
+	float MaximumFallSpeed = 1800.0f;
+
 private:
 	bool UpdateAimTarget();
+	bool CalculateTrajectory(
+		FVector& OutStart,
+		FVector& OutEnd,
+		float& OutArcHeight,
+		float& OutDuration) const;
+	FVector EvaluateTrajectory(float NormalizedTime) const;
+	void DrawTrajectoryPreview() const;
 	void TickCrash(float DeltaTime);
+	void ApplyGravity(float DeltaTime);
 	void TickRecovery(float DeltaTime);
 	void TickCooldown(float DeltaTime);
 	void FinishCrash();
@@ -109,9 +166,14 @@ private:
 
 	EPhaseCrashState CrashState = EPhaseCrashState::Ready;
 	FVector AimTarget = FVector::ZeroVector;
-	FVector CrashDirection = FVector::ZeroVector;
+	FVector CrashStart = FVector::ZeroVector;
+	FVector CrashEnd = FVector::ZeroVector;
 	float ChargeElapsed = 0.0f;
-	float CrashDistanceRemaining = 0.0f;
+	float ActiveArcHeight = 0.0f;
+	float CrashElapsed = 0.0f;
+	float CrashDuration = 0.0f;
+	float ActiveCooldownDuration = 0.0f;
+	float VerticalVelocity = 0.0f;
 	float RecoveryRemaining = 0.0f;
 	float CooldownRemaining = 0.0f;
 };

@@ -32,6 +32,7 @@ private:
 	void StartCrashCharge();
 	void ReleaseCrash();
 	void CancelCrashCharge();
+	void StartGroundDash();
 
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Player|Components")
@@ -60,6 +61,9 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Input")
 	TObjectPtr<UInputAction> CrashAction;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Input")
+	TObjectPtr<UInputAction> DashAction;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Movement", meta = (ClampMin = "0.0"))
 	float MoveSpeed = 600.0f;
