@@ -1,5 +1,7 @@
 #include "Player/PhaseCrashComponent.h"
 
+#include "Arena/AttachSurfaceComponent.h"
+#include "Boss/BossWeakPointComponent.h"
 #include "Combat/CrashResponseComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "DrawDebugHelpers.h"
@@ -59,10 +61,19 @@ void UPhaseCrashComponent::TickComponent(
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
+	if (bAttachCornerTransitionActive)
+	{
+		TickAttachCornerTransition(DeltaTime);
+	}
+
 	switch (CrashState)
 	{
 	case EPhaseCrashState::Charging:
 		ChargeElapsed = FMath::Min(ChargeElapsed + DeltaTime, MaxChargeTime);
+		if (bChargingFromAttachment)
+		{
+			MoveAttached(FVector2D::ZeroVector);
+		}
 		UpdateAimTarget();
 		if (bDrawDebugAim && GetWorld())
 		{
@@ -80,6 +91,21 @@ void UPhaseCrashComponent::TickComponent(
 
 	case EPhaseCrashState::Cooldown:
 		TickCooldown(DeltaTime);
+		break;
+
+	case EPhaseCrashState::Attached:
+		if (!AttachedActor.IsValid()
+			|| !AttachedSurfaceComponent.IsValid()
+			|| !AttachedResponseComponent.IsValid())
+		{
+			DetachFromCrashTarget();
+			ClearTemporaryMoveIgnores();
+			SetCrashState(EPhaseCrashState::Ready);
+		}
+		else
+		{
+			MoveAttached(FVector2D::ZeroVector);
+		}
 		break;
 
 	default:
@@ -124,6 +150,8 @@ void UPhaseCrashComponent::ReleaseCrash()
 		return;
 	}
 
+	bActiveCrashFromAttachment = bChargingFromAttachment;
+	bWeakPointDamageAppliedThisCrash = false;
 	DetachFromCrashTarget();
 	bChargingFromAttachment = false;
 	ClearTemporaryMoveIgnores();
@@ -170,6 +198,8 @@ void UPhaseCrashComponent::StartGroundDash()
 	}
 
 	DetachFromCrashTarget();
+	bActiveCrashFromAttachment = false;
+	bWeakPointDamageAppliedThisCrash = false;
 	ClearTemporaryMoveIgnores();
 	CrashStart = OwnerPawn->GetActorLocation();
 	FVector DashDirection = AimTarget - CrashStart;
@@ -198,6 +228,79 @@ void UPhaseCrashComponent::StartGroundDash()
 		TEXT("Ground dash started. Distance=%.1f Duration=%.2f"),
 		TravelDistance,
 		CrashDuration);
+}
+
+void UPhaseCrashComponent::MoveAttached(const FVector2D& MovementInput)
+{
+	if ((CrashState != EPhaseCrashState::Attached && !bChargingFromAttachment)
+		|| !OwnerPawn
+		|| !AttachedActor.IsValid()
+		|| !AttachedSurfaceComponent.IsValid()
+		|| !AttachedResponseComponent.IsValid()
+		|| !OwnerPawn->GetRootComponent())
+	{
+		return;
+	}
+
+	if (bAttachCornerTransitionActive)
+	{
+		return;
+	}
+
+	const UCrashResponseComponent* ResponseComponent =
+		AttachedResponseComponent.Get();
+	UPrimitiveComponent* SurfaceComponent = AttachedSurfaceComponent.Get();
+	const float MovementStep =
+		ResponseComponent->GetAttachMoveSpeed() * GetWorld()->GetDeltaSeconds();
+
+	if (UAttachSurfaceComponent* AttachBox =
+			Cast<UAttachSurfaceComponent>(SurfaceComponent))
+	{
+		MoveOnAttachBox(*AttachBox, MovementInput, MovementStep);
+		return;
+	}
+
+	const FTransform SurfaceTransform = SurfaceComponent->GetComponentTransform();
+	const FVector SurfaceOrigin =
+		SurfaceTransform.TransformPosition(AttachedSurfaceOriginLocal);
+	const FVector SurfaceOut =
+		SurfaceTransform.TransformVectorNoScale(AttachedSurfaceOutLocal).GetSafeNormal();
+	const FVector SurfaceUp =
+		SurfaceTransform.TransformVectorNoScale(AttachedSurfaceUpLocal).GetSafeNormal();
+	const FVector SurfaceRight =
+		SurfaceTransform.TransformVectorNoScale(AttachedSurfaceRightLocal).GetSafeNormal();
+
+	const float RequestedSurfaceX =
+		AttachedSurfaceX + MovementInput.X * MovementStep;
+	const float RequestedSurfaceY =
+		AttachedSurfaceY + MovementInput.Y * MovementStep;
+
+	const float CandidateSurfaceX = FMath::Clamp(
+		RequestedSurfaceX,
+		AttachedSurfaceMinX,
+		AttachedSurfaceMaxX);
+	const float CandidateSurfaceY = FMath::Clamp(
+		RequestedSurfaceY,
+		AttachedSurfaceMinY,
+		AttachedSurfaceMaxY);
+	const FVector CandidateWorldPosition =
+		SurfaceOrigin
+		+ SurfaceRight * CandidateSurfaceX
+		+ SurfaceUp * CandidateSurfaceY
+		+ SurfaceOut * AttachedSurfaceOffset;
+
+	FHitResult Hit;
+	OwnerPawn->GetRootComponent()->MoveComponent(
+		CandidateWorldPosition - OwnerPawn->GetActorLocation(),
+		OwnerPawn->GetActorRotation(),
+		true,
+		&Hit);
+
+	if (!Hit.IsValidBlockingHit())
+	{
+		AttachedSurfaceX = CandidateSurfaceX;
+		AttachedSurfaceY = CandidateSurfaceY;
+	}
 }
 
 float UPhaseCrashComponent::GetChargeAlpha() const
@@ -495,13 +598,27 @@ void UPhaseCrashComponent::HandleCrashImpact(
 			? TargetActor->FindComponentByClass<UCrashResponseComponent>()
 			: nullptr;
 	const ECrashCollisionResponse Response =
-		ResponseComponent
+		Cast<UAttachSurfaceComponent>(Hit.GetComponent())
+			? ECrashCollisionResponse::Attach
+			: ResponseComponent
 			? ResponseComponent->GetResponse()
 			: ECrashCollisionResponse::Block;
 
 	if (ResponseComponent)
 	{
 		ResponseComponent->NotifyCrashImpact(OwnerPawn, Hit);
+	}
+
+	if (UBossWeakPointComponent* WeakPoint =
+			Cast<UBossWeakPointComponent>(Hit.GetComponent()))
+	{
+		const bool bCanApplyDamage =
+			bActiveCrashFromAttachment
+			&& !bWeakPointDamageAppliedThisCrash;
+		if (WeakPoint->ReceiveCrash(OwnerPawn, Hit, bCanApplyDamage))
+		{
+			bWeakPointDamageAppliedThisCrash = true;
+		}
 	}
 
 	UE_LOG(
@@ -517,7 +634,14 @@ void UPhaseCrashComponent::HandleCrashImpact(
 	switch (Response)
 	{
 	case ECrashCollisionResponse::Attach:
-		HandleAttachImpact(TargetActor, Hit);
+		if (TargetActor && ResponseComponent)
+		{
+			HandleAttachImpact(TargetActor, Hit, *ResponseComponent);
+		}
+		else
+		{
+			FinishCrash();
+		}
 		break;
 
 	case ECrashCollisionResponse::Rebound:
@@ -555,19 +679,116 @@ void UPhaseCrashComponent::HandleCrashImpact(
 
 void UPhaseCrashComponent::HandleAttachImpact(
 	AActor* TargetActor,
-	const FHitResult& Hit)
+	const FHitResult& Hit,
+	UCrashResponseComponent& ResponseComponent)
 {
 	ClearTemporaryMoveIgnores();
 	CrashElapsed = 0.0f;
 	CrashDuration = 0.0f;
 	VerticalVelocity = 0.0f;
 	AttachedActor = TargetActor;
+	AttachedSurfaceComponent = Hit.GetComponent();
+	AttachedResponseComponent = &ResponseComponent;
+	AttachedSurfaceX = 0.0f;
+	AttachedSurfaceY = 0.0f;
 
-	if (TargetActor)
+	UPrimitiveComponent* SurfaceComponent = AttachedSurfaceComponent.Get();
+	if (TargetActor && SurfaceComponent)
 	{
-		OwnerPawn->AttachToActor(
-			TargetActor,
-			FAttachmentTransformRules::KeepWorldTransform);
+		if (UAttachSurfaceComponent* ExplicitSurface =
+				Cast<UAttachSurfaceComponent>(SurfaceComponent))
+		{
+			ConfigureAttachBoxSurface(
+				*ExplicitSurface,
+				Hit.ImpactPoint,
+				Hit.ImpactNormal);
+			AddTemporaryMoveIgnore(TargetActor);
+			SetCrashState(EPhaseCrashState::Attached);
+			return;
+		}
+
+		const FTransform SurfaceTransform = SurfaceComponent->GetComponentTransform();
+		const FVector SurfaceNormal = Hit.ImpactNormal.GetSafeNormal();
+		FVector SurfaceUp = FVector::VectorPlaneProject(
+			FVector::UpVector,
+			SurfaceNormal).GetSafeNormal();
+		if (SurfaceUp.IsNearlyZero())
+		{
+			SurfaceUp = FVector::VectorPlaneProject(
+				SurfaceComponent->GetUpVector(),
+				SurfaceNormal).GetSafeNormal();
+		}
+		if (SurfaceUp.IsNearlyZero())
+		{
+			SurfaceUp = FVector::VectorPlaneProject(
+				SurfaceComponent->GetForwardVector(),
+				SurfaceNormal).GetSafeNormal();
+		}
+		if (SurfaceUp.IsNearlyZero())
+		{
+			FinishCrash();
+			return;
+		}
+
+		const FVector SurfaceRight =
+			FVector::CrossProduct(SurfaceNormal, SurfaceUp).GetSafeNormal();
+		AttachedSurfaceOriginLocal =
+			SurfaceTransform.InverseTransformPosition(Hit.ImpactPoint);
+		AttachedSurfaceOutLocal =
+			SurfaceTransform.InverseTransformVectorNoScale(SurfaceNormal).GetSafeNormal();
+		AttachedSurfaceUpLocal =
+			SurfaceTransform.InverseTransformVectorNoScale(SurfaceUp).GetSafeNormal();
+		AttachedSurfaceRightLocal =
+			SurfaceTransform.InverseTransformVectorNoScale(SurfaceRight).GetSafeNormal();
+		AttachedSurfaceOffset = FMath::Max(
+			FVector::DotProduct(
+				OwnerPawn->GetActorLocation() - Hit.ImpactPoint,
+				SurfaceNormal),
+			1.0f);
+
+		const FBoxSphereBounds LocalBounds = SurfaceComponent->GetLocalBounds();
+		AttachedSurfaceMinX = TNumericLimits<float>::Max();
+		AttachedSurfaceMaxX = TNumericLimits<float>::Lowest();
+		AttachedSurfaceMinY = TNumericLimits<float>::Max();
+		AttachedSurfaceMaxY = TNumericLimits<float>::Lowest();
+
+		for (int32 XSign = -1; XSign <= 1; XSign += 2)
+		{
+			for (int32 YSign = -1; YSign <= 1; YSign += 2)
+			{
+				for (int32 ZSign = -1; ZSign <= 1; ZSign += 2)
+				{
+					const FVector LocalCorner =
+						LocalBounds.Origin
+						+ FVector(
+							LocalBounds.BoxExtent.X * XSign,
+							LocalBounds.BoxExtent.Y * YSign,
+							LocalBounds.BoxExtent.Z * ZSign);
+					const FVector WorldCorner =
+						SurfaceTransform.TransformPosition(LocalCorner);
+					const FVector CornerFromSurfaceOrigin =
+						WorldCorner - Hit.ImpactPoint;
+					const float CornerX = FVector::DotProduct(
+						CornerFromSurfaceOrigin,
+						SurfaceRight);
+					const float CornerY = FVector::DotProduct(
+						CornerFromSurfaceOrigin,
+						SurfaceUp);
+
+					AttachedSurfaceMinX = FMath::Min(AttachedSurfaceMinX, CornerX);
+					AttachedSurfaceMaxX = FMath::Max(AttachedSurfaceMaxX, CornerX);
+					AttachedSurfaceMinY = FMath::Min(AttachedSurfaceMinY, CornerY);
+					AttachedSurfaceMaxY = FMath::Max(AttachedSurfaceMaxY, CornerY);
+				}
+			}
+		}
+
+		AddTemporaryMoveIgnore(TargetActor);
+	}
+	else
+	{
+		FinishCrash();
+		return;
 	}
 
 	SetCrashState(EPhaseCrashState::Attached);
@@ -651,11 +872,291 @@ void UPhaseCrashComponent::ClearTemporaryMoveIgnores()
 
 void UPhaseCrashComponent::DetachFromCrashTarget()
 {
-	if (OwnerPawn && OwnerPawn->GetAttachParentActor())
-	{
-		OwnerPawn->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
-	}
 	AttachedActor.Reset();
+	AttachedSurfaceComponent.Reset();
+	AttachedResponseComponent.Reset();
+	AttachedSurfaceOffset = 50.0f;
+	AttachedSurfaceX = 0.0f;
+	AttachedSurfaceY = 0.0f;
+	AttachedSurfaceMinX = 0.0f;
+	AttachedSurfaceMaxX = 0.0f;
+	AttachedSurfaceMinY = 0.0f;
+	AttachedSurfaceMaxY = 0.0f;
+	AttachedBoxFace = EAttachBoxFace::PositiveX;
+	AttachedBoxContactLocal = FVector::ZeroVector;
+	bAttachCornerTransitionActive = false;
+	AttachCornerTransitionElapsed = 0.0f;
+}
+
+void UPhaseCrashComponent::TickAttachCornerTransition(const float DeltaTime)
+{
+	UAttachSurfaceComponent* AttachBox =
+		Cast<UAttachSurfaceComponent>(AttachedSurfaceComponent.Get());
+	if (!AttachBox || !OwnerPawn || !OwnerPawn->GetRootComponent())
+	{
+		bAttachCornerTransitionActive = false;
+		return;
+	}
+
+	AttachCornerTransitionElapsed += DeltaTime;
+	const float Duration = FMath::Max(AttachCornerTransitionDuration, 0.01f);
+	const float LinearAlpha = FMath::Clamp(
+		AttachCornerTransitionElapsed / Duration,
+		0.0f,
+		1.0f);
+	const float SmoothAlpha = FMath::SmoothStep(0.0f, 1.0f, LinearAlpha);
+
+	const FTransform BoxTransform = AttachBox->GetComponentTransform();
+	const FVector StartNormal =
+		AttachBox->GetFaceNormalWorld(AttachCornerStartFace);
+	const FVector EndNormal =
+		AttachBox->GetFaceNormalWorld(AttachCornerEndFace);
+	const FQuat QuarterTurn = FQuat::FindBetweenNormals(StartNormal, EndNormal);
+	const FVector ArcNormal = FQuat::Slerp(
+		FQuat::Identity,
+		QuarterTurn,
+		SmoothAlpha).RotateVector(StartNormal).GetSafeNormal();
+	const FVector EdgeWorld =
+		BoxTransform.TransformPosition(AttachCornerContactLocal);
+	const FVector TargetPosition =
+		EdgeWorld + ArcNormal * AttachedSurfaceOffset;
+
+	FHitResult Hit;
+	OwnerPawn->GetRootComponent()->MoveComponent(
+		TargetPosition - OwnerPawn->GetActorLocation(),
+		OwnerPawn->GetActorRotation(),
+		true,
+		&Hit);
+	if (Hit.IsValidBlockingHit())
+	{
+		const FVector StartPosition =
+			EdgeWorld + StartNormal * AttachedSurfaceOffset;
+		OwnerPawn->GetRootComponent()->MoveComponent(
+			StartPosition - OwnerPawn->GetActorLocation(),
+			OwnerPawn->GetActorRotation(),
+			false);
+		bAttachCornerTransitionActive = false;
+		AttachCornerTransitionElapsed = 0.0f;
+
+		UE_LOG(
+			LogRDCAPlayer,
+			Warning,
+			TEXT("Attach corner transition blocked. Box=%s Blocker=%s Component=%s"),
+			*GetNameSafe(AttachBox),
+			*GetNameSafe(Hit.GetActor()),
+			*GetNameSafe(Hit.GetComponent()));
+		return;
+	}
+
+	if (LinearAlpha < 1.0f)
+	{
+		return;
+	}
+
+	const FVector PreviousUp = BoxTransform.TransformVectorNoScale(
+		AttachedSurfaceUpLocal).GetSafeNormal();
+	FVector NextUp = QuarterTurn.RotateVector(PreviousUp);
+	NextUp = FVector::VectorPlaneProject(NextUp, EndNormal).GetSafeNormal();
+	if (NextUp.IsNearlyZero())
+	{
+		NextUp = FVector::VectorPlaneProject(
+			FVector::UpVector,
+			EndNormal).GetSafeNormal();
+	}
+	const FVector NextRight =
+		FVector::CrossProduct(EndNormal, NextUp).GetSafeNormal();
+	AttachedSurfaceUpLocal =
+		BoxTransform.InverseTransformVectorNoScale(NextUp).GetSafeNormal();
+	AttachedSurfaceRightLocal =
+		BoxTransform.InverseTransformVectorNoScale(NextRight).GetSafeNormal();
+	AttachedBoxFace = AttachCornerEndFace;
+	AttachedBoxContactLocal = AttachCornerContactLocal;
+	bAttachCornerTransitionActive = false;
+	AttachCornerTransitionElapsed = 0.0f;
+
+	UE_LOG(
+		LogRDCAPlayer,
+		Log,
+		TEXT("Attach box face transition completed. Box=%s From=%d To=%d"),
+		*GetNameSafe(AttachBox),
+		static_cast<int32>(AttachCornerStartFace),
+		static_cast<int32>(AttachCornerEndFace));
+}
+
+bool UPhaseCrashComponent::MoveOnAttachBox(
+	UAttachSurfaceComponent& AttachBox,
+	const FVector2D& MovementInput,
+	const float MovementStep)
+{
+	if (!OwnerPawn || !OwnerPawn->GetRootComponent())
+	{
+		return false;
+	}
+
+	const FTransform BoxTransform = AttachBox.GetComponentTransform();
+	const FVector SurfaceUp = BoxTransform.TransformVectorNoScale(
+		AttachedSurfaceUpLocal).GetSafeNormal();
+	const FVector SurfaceRight = BoxTransform.TransformVectorNoScale(
+		AttachedSurfaceRightLocal).GetSafeNormal();
+	const FVector RequestedDirection =
+		SurfaceRight * MovementInput.X + SurfaceUp * MovementInput.Y;
+	if (RequestedDirection.IsNearlyZero() || MovementStep <= 0.0f)
+	{
+		return true;
+	}
+
+	const FVector CurrentContactWorld =
+		BoxTransform.TransformPosition(AttachedBoxContactLocal);
+	const FVector CandidateContactWorld =
+		CurrentContactWorld + RequestedDirection.GetSafeNormal() * MovementStep;
+	const FVector CandidateLocal =
+		BoxTransform.InverseTransformPosition(CandidateContactWorld);
+	const FVector Extent = AttachBox.GetUnscaledBoxExtent();
+	const FVector CurrentNormalLocal =
+		AttachBox.GetFaceNormalLocal(AttachedBoxFace);
+
+	EAttachBoxFace NextFace = AttachedBoxFace;
+	float LargestOverflow = 0.0f;
+	auto ConsiderAxis = [&LargestOverflow, &NextFace](
+		const float Coordinate,
+		const float HalfExtent,
+		const EAttachBoxFace PositiveFace,
+		const EAttachBoxFace NegativeFace)
+	{
+		const float SafeExtent = FMath::Max(HalfExtent, 1.0f);
+		const float PositiveOverflow = (Coordinate - HalfExtent) / SafeExtent;
+		const float NegativeOverflow = (-HalfExtent - Coordinate) / SafeExtent;
+		if (PositiveOverflow > LargestOverflow)
+		{
+			LargestOverflow = PositiveOverflow;
+			NextFace = PositiveFace;
+		}
+		if (NegativeOverflow > LargestOverflow)
+		{
+			LargestOverflow = NegativeOverflow;
+			NextFace = NegativeFace;
+		}
+	};
+
+	if (FMath::Abs(CurrentNormalLocal.X) < 0.5f)
+	{
+		ConsiderAxis(
+			CandidateLocal.X,
+			Extent.X,
+			EAttachBoxFace::PositiveX,
+			EAttachBoxFace::NegativeX);
+	}
+	if (FMath::Abs(CurrentNormalLocal.Y) < 0.5f)
+	{
+		ConsiderAxis(
+			CandidateLocal.Y,
+			Extent.Y,
+			EAttachBoxFace::PositiveY,
+			EAttachBoxFace::NegativeY);
+	}
+	if (FMath::Abs(CurrentNormalLocal.Z) < 0.5f)
+	{
+		ConsiderAxis(
+			CandidateLocal.Z,
+			Extent.Z,
+			EAttachBoxFace::PositiveZ,
+			EAttachBoxFace::NegativeZ);
+	}
+
+	const bool bChangingFace = NextFace != AttachedBoxFace;
+	const FVector NextContactLocal =
+		AttachBox.ClampPointToFace(CandidateLocal, NextFace);
+	const FVector NextNormalWorld = AttachBox.GetFaceNormalWorld(NextFace);
+	const FVector NextContactWorld =
+		BoxTransform.TransformPosition(NextContactLocal);
+	const FVector NextPawnPosition =
+		NextContactWorld + NextNormalWorld * AttachedSurfaceOffset;
+	const FVector OriginalPawnPosition = OwnerPawn->GetActorLocation();
+
+	if (bChangingFace)
+	{
+		AttachCornerStartFace = AttachedBoxFace;
+		AttachCornerEndFace = NextFace;
+		AttachCornerContactLocal = NextContactLocal;
+		AttachCornerTransitionElapsed = 0.0f;
+		bAttachCornerTransitionActive = true;
+		return true;
+	}
+
+	FHitResult Hit;
+	OwnerPawn->GetRootComponent()->MoveComponent(
+		NextPawnPosition - OwnerPawn->GetActorLocation(),
+		OwnerPawn->GetActorRotation(),
+		true,
+		&Hit);
+
+	if (Hit.IsValidBlockingHit())
+	{
+		UE_LOG(
+			LogRDCAPlayer,
+			Warning,
+			TEXT("Attach box movement blocked. Box=%s Face=%d NextFace=%d Blocker=%s Component=%s"),
+			*GetNameSafe(&AttachBox),
+			static_cast<int32>(AttachedBoxFace),
+			static_cast<int32>(NextFace),
+			*GetNameSafe(Hit.GetActor()),
+			*GetNameSafe(Hit.GetComponent()));
+
+		OwnerPawn->GetRootComponent()->MoveComponent(
+			OriginalPawnPosition - OwnerPawn->GetActorLocation(),
+			OwnerPawn->GetActorRotation(),
+			false);
+		return false;
+	}
+
+	AttachedBoxFace = NextFace;
+	AttachedBoxContactLocal = NextContactLocal;
+	return true;
+}
+
+void UPhaseCrashComponent::ConfigureAttachBoxSurface(
+	UAttachSurfaceComponent& AttachBox,
+	const FVector& WorldContactPoint,
+	const FVector& WorldImpactNormal)
+{
+	AttachedSurfaceComponent = &AttachBox;
+	AttachedBoxFace = AttachBox.GetFaceFromWorldNormal(WorldImpactNormal);
+	const FTransform BoxTransform = AttachBox.GetComponentTransform();
+	AttachedBoxContactLocal = AttachBox.ClampPointToFace(
+		BoxTransform.InverseTransformPosition(WorldContactPoint),
+		AttachedBoxFace);
+
+	const FVector SurfaceNormal =
+		AttachBox.GetFaceNormalWorld(AttachedBoxFace);
+	FVector SurfaceUp = FVector::VectorPlaneProject(
+		FVector::UpVector,
+		SurfaceNormal).GetSafeNormal();
+	if (SurfaceUp.IsNearlyZero())
+	{
+		SurfaceUp = FVector::VectorPlaneProject(
+			AttachBox.GetForwardVector(),
+			SurfaceNormal).GetSafeNormal();
+	}
+	if (SurfaceUp.IsNearlyZero())
+	{
+		SurfaceUp = FVector::VectorPlaneProject(
+			AttachBox.GetRightVector(),
+			SurfaceNormal).GetSafeNormal();
+	}
+	const FVector SurfaceRight =
+		FVector::CrossProduct(SurfaceNormal, SurfaceUp).GetSafeNormal();
+
+	AttachedSurfaceOutLocal =
+		BoxTransform.InverseTransformVectorNoScale(SurfaceNormal).GetSafeNormal();
+	AttachedSurfaceUpLocal =
+		BoxTransform.InverseTransformVectorNoScale(SurfaceUp).GetSafeNormal();
+	AttachedSurfaceRightLocal =
+		BoxTransform.InverseTransformVectorNoScale(SurfaceRight).GetSafeNormal();
+	AttachedSurfaceOffset = FMath::Max(
+		FVector::DotProduct(
+			OwnerPawn->GetActorLocation() - WorldContactPoint,
+			SurfaceNormal),
+		1.0f);
 }
 
 void UPhaseCrashComponent::SetCrashState(const EPhaseCrashState NewState)

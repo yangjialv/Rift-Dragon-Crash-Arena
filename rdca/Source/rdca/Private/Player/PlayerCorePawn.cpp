@@ -141,6 +141,12 @@ void APlayerCorePawn::SetupPlayerInputComponent(UInputComponent* PlayerInputComp
 void APlayerCorePawn::Move(const FInputActionValue& Value)
 {
 	const FVector2D MovementInput = Value.Get<FVector2D>();
+	if (PhaseCrashComponent && PhaseCrashComponent->IsAttached())
+	{
+		PhaseCrashComponent->MoveAttached(MovementInput);
+		return;
+	}
+
 	const float InputScale = PhaseCrashComponent
 		? PhaseCrashComponent->GetMovementInputScale()
 		: 1.0f;

@@ -45,6 +45,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Crash Response")
 	float GetMaximumReboundZRatio() const { return MaximumReboundZRatio; }
 
+	UFUNCTION(BlueprintPure, Category = "Crash Response")
+	float GetAttachMoveSpeed() const { return AttachMoveSpeed; }
+
 	void NotifyCrashImpact(APawn* CrashingPawn, const FHitResult& Hit);
 
 	UPROPERTY(BlueprintAssignable, Category = "Crash Response")
@@ -69,4 +72,9 @@ protected:
 			EditCondition = "Response == ECrashCollisionResponse::Rebound",
 			EditConditionHides))
 	float MaximumReboundZRatio = 0.35f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Crash Response|Attach",
+		meta = (ClampMin = "0.0", EditCondition = "Response == ECrashCollisionResponse::Attach",
+			EditConditionHides))
+	float AttachMoveSpeed = 400.0f;
 };
