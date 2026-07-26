@@ -13,6 +13,7 @@
 #include "InputActionValue.h"
 #include "InputMappingContext.h"
 #include "Player/PhaseCrashComponent.h"
+#include "Player/PlayerHealthComponent.h"
 #include "rdca.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -53,6 +54,7 @@ APlayerCorePawn::APlayerCorePawn()
 	MovementComponent->Deceleration = 5000.0f;
 
 	PhaseCrashComponent = CreateDefaultSubobject<UPhaseCrashComponent>(TEXT("PhaseCrash"));
+	HealthComponent = CreateDefaultSubobject<UPlayerHealthComponent>(TEXT("Health"));
 }
 
 void APlayerCorePawn::BeginPlay()

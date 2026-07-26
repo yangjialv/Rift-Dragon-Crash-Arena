@@ -8,6 +8,7 @@ class UCameraComponent;
 class UInputAction;
 class UInputMappingContext;
 class UPhaseCrashComponent;
+class UPlayerHealthComponent;
 class USphereComponent;
 class USpringArmComponent;
 class UStaticMeshComponent;
@@ -52,6 +53,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Player|Components")
 	TObjectPtr<UPhaseCrashComponent> PhaseCrashComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Player|Components")
+	TObjectPtr<UPlayerHealthComponent> HealthComponent;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Input")
 	TObjectPtr<UInputMappingContext> PlayerMappingContext;
