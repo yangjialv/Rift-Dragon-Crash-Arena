@@ -48,6 +48,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Boss|Encounter")
 	EBossEncounterState GetEncounterState() const { return EncounterState; }
 
+	UFUNCTION(BlueprintPure, Category = "Boss|Encounter")
+	float GetStateProgress() const;
+
+	UFUNCTION(BlueprintPure, Category = "Boss|Encounter")
+	float GetStateRemainingTime() const;
+
 	UPROPERTY(BlueprintAssignable, Category = "Boss|Encounter")
 	FOnBossEncounterStateChanged OnEncounterStateChanged;
 
@@ -101,6 +107,7 @@ private:
 	void UpdateShockwave(float NormalizedTime);
 	void TryDamagePlayer(float PreviousRadius, float CurrentRadius);
 	void UpdateWeakPointVisual(bool bExposed);
+	float GetCurrentStateDuration() const;
 
 	TWeakObjectPtr<UStaticMeshComponent> ShockwaveVisual;
 	TWeakObjectPtr<UStaticMeshComponent> WeakPointVisual;

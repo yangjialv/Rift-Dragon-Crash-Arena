@@ -11,4 +11,11 @@ class RDCA_API ARDCAPlayerController : public APlayerController
 
 public:
 	ARDCAPlayerController();
+
+protected:
+	virtual void BeginPlay() override;
+
+private:
+	UPROPERTY(Transient)
+	TObjectPtr<class UUserWidget> RuntimeCombatHUDWidget;
 };

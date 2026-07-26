@@ -45,6 +45,17 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Player|Health")
 	bool IsDefeated() const { return CurrentHealth <= 0; }
 
+	UFUNCTION(BlueprintPure, Category = "Player|Health")
+	float GetHealthPercent() const
+	{
+		return MaximumHealth > 0
+			? static_cast<float>(CurrentHealth) / MaximumHealth
+			: 0.0f;
+	}
+
+	UFUNCTION(BlueprintPure, Category = "Player|Health")
+	bool IsInvulnerable() const { return InvulnerabilityRemaining > 0.0f; }
+
 	UPROPERTY(BlueprintAssignable, Category = "Player|Health")
 	FOnPlayerHealthChanged OnHealthChanged;
 

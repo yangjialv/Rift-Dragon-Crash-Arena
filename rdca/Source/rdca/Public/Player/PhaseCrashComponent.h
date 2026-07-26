@@ -73,6 +73,9 @@ public:
 	float GetCooldownRemaining() const { return CooldownRemaining; }
 
 	UFUNCTION(BlueprintPure, Category = "Phase Crash")
+	float GetCooldownReadyPercent() const;
+
+	UFUNCTION(BlueprintPure, Category = "Phase Crash")
 	ECrashArcType GetPredictedArcType() const;
 
 	UFUNCTION(BlueprintPure, Category = "Phase Crash")

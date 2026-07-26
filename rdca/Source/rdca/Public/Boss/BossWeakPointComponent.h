@@ -60,6 +60,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Boss|Weak Point")
 	int32 GetMaximumHitPoints() const { return MaximumHitPoints; }
 
+	UFUNCTION(BlueprintPure, Category = "Boss|Weak Point")
+	float GetHitPointsPercent() const
+	{
+		return MaximumHitPoints > 0
+			? static_cast<float>(CurrentHitPoints) / MaximumHitPoints
+			: 0.0f;
+	}
+
 	bool ReceiveCrash(
 		APawn* CrashingPawn,
 		const FHitResult& Hit,

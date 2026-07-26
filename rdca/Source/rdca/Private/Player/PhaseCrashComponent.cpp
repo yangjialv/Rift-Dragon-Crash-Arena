@@ -310,6 +310,23 @@ float UPhaseCrashComponent::GetChargeAlpha() const
 		: 1.0f;
 }
 
+float UPhaseCrashComponent::GetCooldownReadyPercent() const
+{
+	if (CrashState != EPhaseCrashState::Cooldown)
+	{
+		return CrashState == EPhaseCrashState::Ready
+			|| CrashState == EPhaseCrashState::Charging
+			|| CrashState == EPhaseCrashState::Attached
+			? 1.0f
+			: 0.0f;
+	}
+
+	const float Duration = FMath::Max(ActiveCooldownDuration, CooldownDuration);
+	return Duration > 0.0f
+		? 1.0f - FMath::Clamp(CooldownRemaining / Duration, 0.0f, 1.0f)
+		: 1.0f;
+}
+
 ECrashArcType UPhaseCrashComponent::GetPredictedArcType() const
 {
 	return GetChargeAlpha() >= HighArcThreshold

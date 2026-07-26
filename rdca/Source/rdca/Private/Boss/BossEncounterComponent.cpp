@@ -14,6 +14,39 @@ UBossEncounterComponent::UBossEncounterComponent()
 	PrimaryComponentTick.bCanEverTick = true;
 }
 
+float UBossEncounterComponent::GetStateProgress() const
+{
+	const float Duration = GetCurrentStateDuration();
+	return Duration > 0.0f
+		? FMath::Clamp(StateElapsed / Duration, 0.0f, 1.0f)
+		: 1.0f;
+}
+
+float UBossEncounterComponent::GetStateRemainingTime() const
+{
+	return FMath::Max(GetCurrentStateDuration() - StateElapsed, 0.0f);
+}
+
+float UBossEncounterComponent::GetCurrentStateDuration() const
+{
+	switch (EncounterState)
+	{
+	case EBossEncounterState::Idle:
+		return InitialIdleDuration;
+	case EBossEncounterState::PreparingAttack:
+		return WarningDuration;
+	case EBossEncounterState::Attacking:
+		return AttackDuration;
+	case EBossEncounterState::Recovery:
+		return RecoveryDuration;
+	case EBossEncounterState::WeakPointExposed:
+		return WeakPointExposedDuration;
+	case EBossEncounterState::Dead:
+	default:
+		return 0.0f;
+	}
+}
+
 void UBossEncounterComponent::BeginPlay()
 {
 	Super::BeginPlay();
