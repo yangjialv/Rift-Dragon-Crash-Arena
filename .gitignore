@@ -7,6 +7,9 @@
 # Unreal local developer content
 **/Content/Developers/
 
+# Local third-party reference assets
+rdca/Content/sA_Megapack_v1/
+
 # Visual Studio and IDE-generated files
 **/.vs/
 **/.vscode/

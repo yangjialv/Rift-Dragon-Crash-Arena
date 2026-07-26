@@ -1,6 +1,8 @@
 #include "Boss/BossEncounterComponent.h"
 
 #include "Boss/BossWeakPointComponent.h"
+#include "Boss/BossFanProjectile.h"
+#include "Boss/BossSweepLaser.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
@@ -12,6 +14,8 @@
 UBossEncounterComponent::UBossEncounterComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
+	FanProjectileClass = ABossFanProjectile::StaticClass();
+	SweepLaserClass = ABossSweepLaser::StaticClass();
 }
 
 float UBossEncounterComponent::GetStateProgress() const
@@ -41,6 +45,14 @@ float UBossEncounterComponent::GetCurrentStateDuration() const
 		return RecoveryDuration;
 	case EBossEncounterState::WeakPointExposed:
 		return WeakPointExposedDuration;
+	case EBossEncounterState::PreparingFanAttack:
+		return FanWarningDuration;
+	case EBossEncounterState::FanAttacking:
+		return FanAttackDuration;
+	case EBossEncounterState::PreparingLaserAttack:
+		return LaserWarningDuration;
+	case EBossEncounterState::LaserAttacking:
+		return LaserSweepDuration;
 	case EBossEncounterState::Dead:
 	default:
 		return 0.0f;
@@ -130,7 +142,44 @@ void UBossEncounterComponent::TickComponent(
 	case EBossEncounterState::WeakPointExposed:
 		if (StateElapsed >= WeakPointExposedDuration)
 		{
-			SetEncounterState(EBossEncounterState::PreparingAttack);
+			switch (NextAttackPattern)
+			{
+			case 1:
+				SetEncounterState(EBossEncounterState::PreparingFanAttack);
+				break;
+			case 2:
+				SetEncounterState(EBossEncounterState::PreparingLaserAttack);
+				break;
+			case 0:
+			default:
+				SetEncounterState(EBossEncounterState::PreparingAttack);
+				break;
+			}
+			NextAttackPattern = (NextAttackPattern + 1) % 3;
+		}
+		break;
+	case EBossEncounterState::PreparingFanAttack:
+		if (StateElapsed >= FanWarningDuration)
+		{
+			SetEncounterState(EBossEncounterState::FanAttacking);
+		}
+		break;
+	case EBossEncounterState::FanAttacking:
+		if (StateElapsed >= FanAttackDuration)
+		{
+			SetEncounterState(EBossEncounterState::Recovery);
+		}
+		break;
+	case EBossEncounterState::PreparingLaserAttack:
+		if (StateElapsed >= LaserWarningDuration)
+		{
+			SetEncounterState(EBossEncounterState::LaserAttacking);
+		}
+		break;
+	case EBossEncounterState::LaserAttacking:
+		if (StateElapsed >= LaserSweepDuration)
+		{
+			SetEncounterState(EBossEncounterState::Recovery);
 		}
 		break;
 	default:
@@ -182,6 +231,32 @@ void UBossEncounterComponent::SetEncounterState(
 		}
 	}
 
+	if (NewState == EBossEncounterState::FanAttacking)
+	{
+		SpawnFanProjectiles();
+	}
+	else if (NewState == EBossEncounterState::PreparingLaserAttack)
+	{
+		SpawnLaserWarning();
+	}
+	else if (NewState == EBossEncounterState::LaserAttacking
+		&& ActiveSweepLaser.IsValid())
+	{
+		ActiveSweepLaser->ActivateLaser();
+	}
+	else if (NewState == EBossEncounterState::Recovery
+		&& ActiveSweepLaser.IsValid())
+	{
+		ActiveSweepLaser->Destroy();
+		ActiveSweepLaser.Reset();
+	}
+	else if (NewState == EBossEncounterState::Dead
+		&& ActiveSweepLaser.IsValid())
+	{
+		ActiveSweepLaser->Destroy();
+		ActiveSweepLaser.Reset();
+	}
+
 	OnEncounterStateChanged.Broadcast(PreviousState, NewState);
 	UE_LOG(
 		LogRDCAPlayer,
@@ -190,6 +265,113 @@ void UBossEncounterComponent::SetEncounterState(
 		*GetNameSafe(GetOwner()),
 		static_cast<int32>(PreviousState),
 		static_cast<int32>(NewState));
+}
+
+void UBossEncounterComponent::SpawnLaserWarning()
+{
+	if (!GetWorld() || !SweepLaserClass)
+	{
+		return;
+	}
+
+	APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+	if (!PlayerPawn)
+	{
+		return;
+	}
+
+	if (ActiveSweepLaser.IsValid())
+	{
+		ActiveSweepLaser->Destroy();
+	}
+
+	const FVector SpawnLocation = GetOwner()->GetActorLocation();
+	FVector ToPlayer = PlayerPawn->GetActorLocation() - SpawnLocation;
+	ToPlayer.Z = 0.0f;
+	const float CenterYaw = ToPlayer.Rotation().Yaw;
+	const float StartYaw = CenterYaw - LaserSweepDegrees * 0.5f;
+	const float EndYaw = CenterYaw + LaserSweepDegrees * 0.5f;
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.Owner = GetOwner();
+	SpawnParameters.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	ABossSweepLaser* Laser = GetWorld()->SpawnActor<ABossSweepLaser>(
+		SweepLaserClass,
+		SpawnLocation,
+		FRotator::ZeroRotator,
+		SpawnParameters);
+	if (Laser)
+	{
+		Laser->InitializeLaser(
+			StartYaw,
+			EndYaw,
+			LaserSweepDuration,
+			LaserDamage);
+		ActiveSweepLaser = Laser;
+	}
+}
+
+void UBossEncounterComponent::SpawnFanProjectiles()
+{
+	if (!GetWorld() || !FanProjectileClass)
+	{
+		return;
+	}
+
+	APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+	if (!PlayerPawn)
+	{
+		return;
+	}
+
+	const FVector SpawnLocation =
+		GetOwner()->GetActorLocation() + FVector(0.0f, 0.0f, 60.0f);
+	FVector CenterDirection = PlayerPawn->GetActorLocation() - SpawnLocation;
+	CenterDirection.Z = 0.0f;
+	if (!CenterDirection.Normalize())
+	{
+		return;
+	}
+
+	const int32 ProjectileCount = FMath::Max(FanProjectileCount, 1);
+	for (int32 Index = 0; Index < ProjectileCount; ++Index)
+	{
+		const float Alpha = ProjectileCount > 1
+			? static_cast<float>(Index) / (ProjectileCount - 1)
+			: 0.5f;
+		const float YawOffset =
+			FMath::Lerp(-FanSpreadDegrees * 0.5f, FanSpreadDegrees * 0.5f, Alpha);
+		const FVector Direction =
+			CenterDirection.RotateAngleAxis(YawOffset, FVector::UpVector);
+
+		FActorSpawnParameters SpawnParameters;
+		SpawnParameters.Owner = GetOwner();
+		SpawnParameters.SpawnCollisionHandlingOverride =
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		ABossFanProjectile* Projectile =
+			GetWorld()->SpawnActor<ABossFanProjectile>(
+				FanProjectileClass,
+				SpawnLocation,
+				Direction.Rotation(),
+				SpawnParameters);
+		if (Projectile)
+		{
+			Projectile->InitializeProjectile(
+				Direction,
+				FanProjectileSpeed,
+				FanProjectileDamage);
+		}
+	}
+
+	UE_LOG(
+		LogRDCAPlayer,
+		Log,
+		TEXT("Boss fan attack spawned. Boss=%s Count=%d Spread=%.1f Speed=%.1f"),
+		*GetNameSafe(GetOwner()),
+		ProjectileCount,
+		FanSpreadDegrees,
+		FanProjectileSpeed);
 }
 
 void UBossEncounterComponent::UpdateShockwave(const float NormalizedTime)

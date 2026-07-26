@@ -25,6 +25,14 @@ FText GetBossStateText(const EBossEncounterState State)
 		return FText::FromString(TEXT("RECOVERY"));
 	case EBossEncounterState::WeakPointExposed:
 		return FText::FromString(TEXT("WEAK POINT EXPOSED"));
+	case EBossEncounterState::PreparingFanAttack:
+		return FText::FromString(TEXT("FAN ATTACK WARNING"));
+	case EBossEncounterState::FanAttacking:
+		return FText::FromString(TEXT("FAN ATTACK"));
+	case EBossEncounterState::PreparingLaserAttack:
+		return FText::FromString(TEXT("LASER WARNING"));
+	case EBossEncounterState::LaserAttacking:
+		return FText::FromString(TEXT("LASER SWEEP"));
 	case EBossEncounterState::Dead:
 		return FText::FromString(TEXT("BOSS DEFEATED"));
 	default:

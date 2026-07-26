@@ -7,6 +7,8 @@
 class UBossWeakPointComponent;
 class UMaterialInterface;
 class UStaticMeshComponent;
+class ABossFanProjectile;
+class ABossSweepLaser;
 
 UENUM(BlueprintType)
 enum class EBossEncounterState : uint8
@@ -16,6 +18,10 @@ enum class EBossEncounterState : uint8
 	Attacking,
 	Recovery,
 	WeakPointExposed,
+	PreparingFanAttack,
+	FanAttacking,
+	PreparingLaserAttack,
+	LaserAttacking,
 	Dead
 };
 
@@ -78,6 +84,52 @@ protected:
 		meta = (ClampMin = "0.1"))
 	float WeakPointExposedDuration = 3.0f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Attack",
+		meta = (ClampMin = "0.1"))
+	float FanWarningDuration = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Attack",
+		meta = (ClampMin = "0.1"))
+	float FanAttackDuration = 0.6f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Attack",
+		meta = (ClampMin = "1", ClampMax = "21"))
+	int32 FanProjectileCount = 7;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Attack",
+		meta = (ClampMin = "0.0", ClampMax = "170.0"))
+	float FanSpreadDegrees = 70.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Attack",
+		meta = (ClampMin = "1.0"))
+	float FanProjectileSpeed = 900.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Attack",
+		meta = (ClampMin = "1"))
+	int32 FanProjectileDamage = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Attack")
+	TSubclassOf<ABossFanProjectile> FanProjectileClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Laser Attack",
+		meta = (ClampMin = "0.1"))
+	float LaserWarningDuration = 1.2f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Laser Attack",
+		meta = (ClampMin = "0.1"))
+	float LaserSweepDuration = 1.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Laser Attack",
+		meta = (ClampMin = "1.0", ClampMax = "300.0"))
+	float LaserSweepDegrees = 120.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Laser Attack",
+		meta = (ClampMin = "1"))
+	int32 LaserDamage = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Laser Attack")
+	TSubclassOf<ABossSweepLaser> SweepLaserClass;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Shockwave",
 		meta = (ClampMin = "1.0"))
 	float ShockwaveMaximumRadius = 1200.0f;
@@ -108,6 +160,8 @@ private:
 	void TryDamagePlayer(float PreviousRadius, float CurrentRadius);
 	void UpdateWeakPointVisual(bool bExposed);
 	float GetCurrentStateDuration() const;
+	void SpawnFanProjectiles();
+	void SpawnLaserWarning();
 
 	TWeakObjectPtr<UStaticMeshComponent> ShockwaveVisual;
 	TWeakObjectPtr<UStaticMeshComponent> WeakPointVisual;
@@ -117,4 +171,6 @@ private:
 	float StateElapsed = 0.0f;
 	float PreviousShockwaveRadius = 0.0f;
 	bool bPlayerDamagedThisAttack = false;
+	int32 NextAttackPattern = 1;
+	TWeakObjectPtr<ABossSweepLaser> ActiveSweepLaser;
 };
