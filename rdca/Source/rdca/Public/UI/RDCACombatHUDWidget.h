@@ -10,6 +10,8 @@ class UPhaseCrashComponent;
 class UPlayerHealthComponent;
 class UProgressBar;
 class UTextBlock;
+class UButton;
+class UWidget;
 
 UCLASS(Abstract, Blueprintable)
 class RDCA_API URDCACombatHUDWidget : public UUserWidget
@@ -19,6 +21,9 @@ class RDCA_API URDCACombatHUDWidget : public UUserWidget
 protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
+
+	UFUNCTION()
+	void HandleRestartClicked();
 
 private:
 	void ResolvePlayerComponents();
@@ -51,6 +56,15 @@ private:
 
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> TXT_BossState;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UWidget> PANEL_BattleResult;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> TXT_BattleResult;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> BTN_Restart;
 
 	TWeakObjectPtr<UPlayerHealthComponent> PlayerHealth;
 	TWeakObjectPtr<UPhaseCrashComponent> PhaseCrash;

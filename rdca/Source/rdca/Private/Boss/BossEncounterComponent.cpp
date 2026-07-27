@@ -4,6 +4,7 @@
 #include "Boss/BossFanProjectile.h"
 #include "Boss/BossSweepLaser.h"
 #include "Components/StaticMeshComponent.h"
+#include "EngineUtils.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
@@ -104,9 +105,10 @@ void UBossEncounterComponent::TickComponent(
 	if (WeakPoint.IsValid() && WeakPoint->IsBossDefeated())
 	{
 		SetEncounterState(EBossEncounterState::Dead);
+		StopEncounter();
 		return;
 	}
-	if (EncounterState == EBossEncounterState::Dead)
+	if (EncounterState == EBossEncounterState::Dead || bEncounterStopped)
 	{
 		return;
 	}
@@ -185,6 +187,46 @@ void UBossEncounterComponent::TickComponent(
 	default:
 		break;
 	}
+}
+
+void UBossEncounterComponent::StopEncounter()
+{
+	if (bEncounterStopped)
+	{
+		return;
+	}
+	bEncounterStopped = true;
+
+	if (ShockwaveVisual.IsValid())
+	{
+		ShockwaveVisual->SetVisibility(false);
+	}
+	if (ActiveSweepLaser.IsValid())
+	{
+		ActiveSweepLaser->Destroy();
+		ActiveSweepLaser.Reset();
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			AActor* AttackActor = *It;
+			if (IsValid(AttackActor)
+				&& AttackActor->GetOwner() == GetOwner()
+				&& (AttackActor->IsA<ABossFanProjectile>()
+					|| AttackActor->IsA<ABossSweepLaser>()))
+			{
+				AttackActor->Destroy();
+			}
+		}
+	}
+
+	UE_LOG(
+		LogRDCAPlayer,
+		Log,
+		TEXT("Boss encounter stopped. Boss=%s"),
+		*GetNameSafe(GetOwner()));
 }
 
 void UBossEncounterComponent::SetEncounterState(

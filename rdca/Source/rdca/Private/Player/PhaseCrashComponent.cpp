@@ -70,7 +70,6 @@ void UPhaseCrashComponent::TickComponent(
 	switch (CrashState)
 	{
 	case EPhaseCrashState::Charging:
-		ChargeElapsed = FMath::Min(ChargeElapsed + DeltaTime, MaxChargeTime);
 		if (bChargingFromAttachment)
 		{
 			MoveAttached(FVector2D::ZeroVector);
@@ -131,8 +130,11 @@ void UPhaseCrashComponent::StartCharging()
 	}
 
 	bChargingFromAttachment = CrashState == EPhaseCrashState::Attached;
-	ChargeElapsed = 0.0f;
-	UpdateAimTarget();
+	if (!UpdateAimTarget())
+	{
+		return;
+	}
+	DragStartAimTarget = AimTarget;
 	SetCrashState(EPhaseCrashState::Charging);
 }
 
@@ -321,8 +323,10 @@ void UPhaseCrashComponent::ForceDetachFromAttachment()
 
 float UPhaseCrashComponent::GetChargeAlpha() const
 {
-	return MaxChargeTime > 0.0f
-		? FMath::Clamp(ChargeElapsed / MaxChargeTime, 0.0f, 1.0f)
+	FVector DragOffset = AimTarget - DragStartAimTarget;
+	DragOffset.Z = 0.0f;
+	return MaxDragDistance > 0.0f
+		? FMath::Clamp(DragOffset.Size() / MaxDragDistance, 0.0f, 1.0f)
 		: 1.0f;
 }
 
@@ -398,7 +402,6 @@ bool UPhaseCrashComponent::UpdateAimTarget()
 		QueryParams))
 	{
 		AimTarget = Hit.ImpactPoint;
-		AimTarget.Z = OwnerPawn->GetActorLocation().Z;
 		return true;
 	}
 
@@ -434,28 +437,33 @@ bool UPhaseCrashComponent::CalculateTrajectory(
 	FVector HorizontalOffset = AimTarget - OutStart;
 	HorizontalOffset.Z = 0.0f;
 
-	const float CursorDistance = HorizontalOffset.Size();
-	if (CursorDistance <= UE_KINDA_SMALL_NUMBER)
+	FVector DragOffset = AimTarget - DragStartAimTarget;
+	DragOffset.Z = 0.0f;
+	if (DragOffset.Size() < MinimumDragDistance)
 	{
 		return false;
 	}
 
-	const FVector Direction = HorizontalOffset / CursorDistance;
-	const float ChargeAlpha = GetChargeAlpha();
-	const float MaximumChargedDistance = FMath::Lerp(
-		MinCrashDistance,
-		MaxCrashDistance,
-		ChargeAlpha);
-	const float TravelDistance = FMath::Clamp(
-		CursorDistance,
-		FMath::Min(MinCrashDistance, MaximumChargedDistance),
-		MaximumChargedDistance);
+	const float TargetHorizontalDistance = HorizontalOffset.Size();
+	if (TargetHorizontalDistance <= UE_KINDA_SMALL_NUMBER)
+	{
+		return false;
+	}
 
+	const FVector Direction = HorizontalOffset / TargetHorizontalDistance;
+	const float ChargeAlpha = GetChargeAlpha();
+	const float TravelDistance = FMath::Min(
+		TargetHorizontalDistance,
+		MaxCrashDistance);
+	const float TargetHeightAlpha = FMath::Clamp(
+		TravelDistance / TargetHorizontalDistance,
+		0.0f,
+		1.0f);
 	OutEnd = OutStart + Direction * TravelDistance;
-	OutEnd.Z = OutStart.Z;
+	OutEnd.Z = FMath::Lerp(OutStart.Z, AimTarget.Z, TargetHeightAlpha);
 	OutArcHeight = FMath::Lerp(MinArcHeight, MaxArcHeight, ChargeAlpha);
 	OutDuration = FMath::Max(
-		TravelDistance / FMath::Max(CrashSpeed, 1.0f),
+		FVector::Distance(OutStart, OutEnd) / FMath::Max(CrashSpeed, 1.0f),
 		MinimumFlightDuration);
 	return true;
 }

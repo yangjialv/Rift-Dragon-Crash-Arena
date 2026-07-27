@@ -99,9 +99,15 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Charge",
-		meta = (ClampMin = "0.05"))
-	float MaxChargeTime = 1.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Drag Aim",
+		meta = (ClampMin = "1.0",
+			ToolTip = "World-space cursor drag distance that produces maximum launch power."))
+	float MaxDragDistance = 800.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Drag Aim",
+		meta = (ClampMin = "0.0",
+			ToolTip = "A release below this world-space drag distance cancels the launch."))
+	float MinimumDragDistance = 35.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Movement",
 		meta = (ClampMin = "0.0"))
@@ -237,9 +243,9 @@ private:
 	EAttachBoxFace AttachCornerEndFace = EAttachBoxFace::PositiveX;
 	FVector AttachCornerContactLocal = FVector::ZeroVector;
 	FVector AimTarget = FVector::ZeroVector;
+	FVector DragStartAimTarget = FVector::ZeroVector;
 	FVector CrashStart = FVector::ZeroVector;
 	FVector CrashEnd = FVector::ZeroVector;
-	float ChargeElapsed = 0.0f;
 	float ActiveArcHeight = 0.0f;
 	float CrashElapsed = 0.0f;
 	float CrashDuration = 0.0f;

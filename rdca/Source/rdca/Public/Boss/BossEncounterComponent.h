@@ -60,6 +60,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Boss|Encounter")
 	float GetStateRemainingTime() const;
 
+	UFUNCTION(BlueprintCallable, Category = "Boss|Encounter")
+	void StopEncounter();
+
 	UPROPERTY(BlueprintAssignable, Category = "Boss|Encounter")
 	FOnBossEncounterStateChanged OnEncounterStateChanged;
 
@@ -171,6 +174,7 @@ private:
 	float StateElapsed = 0.0f;
 	float PreviousShockwaveRadius = 0.0f;
 	bool bPlayerDamagedThisAttack = false;
+	bool bEncounterStopped = false;
 	int32 NextAttackPattern = 1;
 	TWeakObjectPtr<ABossSweepLaser> ActiveSweepLaser;
 };

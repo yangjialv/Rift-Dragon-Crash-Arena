@@ -3,9 +3,11 @@
 #include "Boss/BossEncounterComponent.h"
 #include "Boss/BossWeakPointComponent.h"
 #include "Components/ProgressBar.h"
+#include "Components/Button.h"
 #include "Components/TextBlock.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
+#include "Game/RDCAPlayerController.h"
 #include "Player/PhaseCrashComponent.h"
 #include "Player/PlayerHealthComponent.h"
 
@@ -46,6 +48,12 @@ void URDCACombatHUDWidget::NativeConstruct()
 	Super::NativeConstruct();
 	ResolvePlayerComponents();
 	ResolveBossComponents();
+	if (BTN_Restart)
+	{
+		BTN_Restart->OnClicked.AddUniqueDynamic(
+			this,
+			&URDCACombatHUDWidget::HandleRestartClicked);
+	}
 	UpdateHUD();
 }
 
@@ -174,5 +182,34 @@ void URDCACombatHUDWidget::UpdateHUD()
 	{
 		TXT_BossState->SetText(
 			GetBossStateText(BossEncounter->GetEncounterState()));
+	}
+
+	const ARDCAPlayerController* RDCAController =
+		Cast<ARDCAPlayerController>(GetOwningPlayer());
+	const ECombatResult CombatResult = RDCAController
+		? RDCAController->GetCombatResult()
+		: ECombatResult::Playing;
+	if (PANEL_BattleResult)
+	{
+		PANEL_BattleResult->SetVisibility(
+			CombatResult == ECombatResult::Playing
+				? ESlateVisibility::Collapsed
+				: ESlateVisibility::Visible);
+	}
+	if (TXT_BattleResult && CombatResult != ECombatResult::Playing)
+	{
+		TXT_BattleResult->SetText(
+			CombatResult == ECombatResult::Victory
+				? FText::FromString(TEXT("VICTORY"))
+				: FText::FromString(TEXT("DEFEAT")));
+	}
+}
+
+void URDCACombatHUDWidget::HandleRestartClicked()
+{
+	if (ARDCAPlayerController* RDCAController =
+			Cast<ARDCAPlayerController>(GetOwningPlayer()))
+	{
+		RDCAController->RestartCurrentBattle();
 	}
 }

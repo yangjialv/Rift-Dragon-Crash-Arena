@@ -1,9 +1,11 @@
 #include "Arena/AnchorOverloadComponent.h"
 
 #include "Arena/AttachSurfaceComponent.h"
+#include "Arena/AnchorSpawnManager.h"
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/Pawn.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Player/PhaseCrashComponent.h"
 #include "Player/PlayerHealthComponent.h"
 #include "rdca.h"
@@ -41,6 +43,12 @@ void UAnchorOverloadComponent::BeginPlay()
 	}
 
 	ApplyAnchorMaterial(NormalMaterial);
+	if (AnchorVisual.IsValid())
+	{
+		OverloadMaterialInstance =
+			AnchorVisual->CreateDynamicMaterialInstance(0);
+		UpdateOverloadMaterial(0.0f);
+	}
 }
 
 void UAnchorOverloadComponent::TickComponent(
@@ -62,10 +70,26 @@ void UAnchorOverloadComponent::TickComponent(
 
 	if (!AttachedPlayer.IsValid())
 	{
+		UpdateOverloadMaterial(0.0f);
 		return;
 	}
 
 	StateElapsed += DeltaTime;
+	const float OverloadAlpha =
+		OverloadState == EAnchorOverloadState::Warning
+			? FMath::Lerp(
+				0.5f,
+				1.0f,
+				FMath::Clamp(StateElapsed / WarningDuration, 0.0f, 1.0f))
+			: FMath::Lerp(
+				0.0f,
+				0.5f,
+				FMath::Clamp(
+					StateElapsed / SafeAttachmentDuration,
+					0.0f,
+					1.0f));
+	UpdateOverloadMaterial(OverloadAlpha);
+
 	if (OverloadState == EAnchorOverloadState::Normal
 		&& StateElapsed >= SafeAttachmentDuration)
 	{
@@ -126,11 +150,7 @@ void UAnchorOverloadComponent::SetOverloadState(
 
 	if (NewState == EAnchorOverloadState::Normal)
 	{
-		ApplyAnchorMaterial(NormalMaterial);
-	}
-	else if (NewState == EAnchorOverloadState::Warning)
-	{
-		ApplyAnchorMaterial(WarningMaterial);
+		UpdateOverloadMaterial(0.0f);
 	}
 
 	OnOverloadStateChanged.Broadcast(PreviousState, NewState);
@@ -174,6 +194,16 @@ void UAnchorOverloadComponent::TriggerOverload()
 			FractureActorClass,
 			GetOwner()->GetActorTransform(),
 			SpawnParameters);
+		if (SpawnedFractureActor.IsValid())
+		{
+			SpawnedFractureActor->SetLifeSpan(RecoveryDuration);
+		}
+	}
+
+	if (AAnchorSpawnManager* SpawnManager =
+			Cast<AAnchorSpawnManager>(GetOwner()->GetOwner()))
+	{
+		SpawnManager->HandleManagedAnchorOverloaded(GetOwner());
 	}
 
 	UE_LOG(
@@ -218,5 +248,16 @@ void UAnchorOverloadComponent::ApplyAnchorMaterial(
 	if (AnchorVisual.IsValid() && Material)
 	{
 		AnchorVisual->SetMaterial(0, Material);
+	}
+}
+
+void UAnchorOverloadComponent::UpdateOverloadMaterial(
+	const float OverloadAlpha)
+{
+	if (OverloadMaterialInstance)
+	{
+		OverloadMaterialInstance->SetScalarParameterValue(
+			TEXT("OverloadAlpha"),
+			FMath::Clamp(OverloadAlpha, 0.0f, 1.0f));
 	}
 }

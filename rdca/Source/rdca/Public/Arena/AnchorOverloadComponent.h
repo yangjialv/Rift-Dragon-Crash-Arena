@@ -7,6 +7,7 @@
 class APawn;
 class UAttachSurfaceComponent;
 class UMaterialInterface;
+class UMaterialInstanceDynamic;
 class UStaticMeshComponent;
 
 UENUM(BlueprintType)
@@ -87,11 +88,13 @@ private:
 	void FinishRecovery();
 	void SetAnchorAvailable(bool bAvailable);
 	void ApplyAnchorMaterial(UMaterialInterface* Material);
+	void UpdateOverloadMaterial(float OverloadAlpha);
 
 	TWeakObjectPtr<APawn> AttachedPlayer;
 	TWeakObjectPtr<UAttachSurfaceComponent> AttachSurface;
 	TWeakObjectPtr<UStaticMeshComponent> AnchorVisual;
 	TWeakObjectPtr<AActor> SpawnedFractureActor;
+	TObjectPtr<UMaterialInstanceDynamic> OverloadMaterialInstance;
 	EAnchorOverloadState OverloadState = EAnchorOverloadState::Normal;
 	float StateElapsed = 0.0f;
 };
