@@ -90,6 +90,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Phase Crash")
 	void MoveAttached(const FVector2D& MovementInput);
 
+	UFUNCTION(BlueprintCallable, Category = "Phase Crash")
+	void ForceDetachFromAttachment();
+
 	UPROPERTY(BlueprintAssignable, Category = "Phase Crash")
 	FOnPhaseCrashStateChanged OnCrashStateChanged;
 

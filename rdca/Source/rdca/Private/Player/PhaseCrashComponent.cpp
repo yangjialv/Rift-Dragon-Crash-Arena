@@ -1,6 +1,7 @@
 #include "Player/PhaseCrashComponent.h"
 
 #include "Arena/AttachSurfaceComponent.h"
+#include "Arena/AnchorOverloadComponent.h"
 #include "Boss/BossWeakPointComponent.h"
 #include "Combat/CrashResponseComponent.h"
 #include "Components/PrimitiveComponent.h"
@@ -301,6 +302,21 @@ void UPhaseCrashComponent::MoveAttached(const FVector2D& MovementInput)
 		AttachedSurfaceX = CandidateSurfaceX;
 		AttachedSurfaceY = CandidateSurfaceY;
 	}
+}
+
+void UPhaseCrashComponent::ForceDetachFromAttachment()
+{
+	if (!IsAttached())
+	{
+		return;
+	}
+
+	bChargingFromAttachment = false;
+	bAttachCornerTransitionActive = false;
+	DetachFromCrashTarget();
+	ClearTemporaryMoveIgnores();
+	VerticalVelocity = 0.0f;
+	SetCrashState(EPhaseCrashState::Ready);
 }
 
 float UPhaseCrashComponent::GetChargeAlpha() const
@@ -708,6 +724,11 @@ void UPhaseCrashComponent::HandleAttachImpact(
 	AttachedResponseComponent = &ResponseComponent;
 	AttachedSurfaceX = 0.0f;
 	AttachedSurfaceY = 0.0f;
+	if (UAnchorOverloadComponent* Overload =
+			TargetActor->FindComponentByClass<UAnchorOverloadComponent>())
+	{
+		Overload->NotifyPlayerAttached(OwnerPawn);
+	}
 
 	UPrimitiveComponent* SurfaceComponent = AttachedSurfaceComponent.Get();
 	if (TargetActor && SurfaceComponent)
@@ -889,6 +910,15 @@ void UPhaseCrashComponent::ClearTemporaryMoveIgnores()
 
 void UPhaseCrashComponent::DetachFromCrashTarget()
 {
+	if (AttachedActor.IsValid())
+	{
+		if (UAnchorOverloadComponent* Overload =
+				AttachedActor->FindComponentByClass<UAnchorOverloadComponent>())
+		{
+			Overload->NotifyPlayerDetached(OwnerPawn);
+		}
+	}
+
 	AttachedActor.Reset();
 	AttachedSurfaceComponent.Reset();
 	AttachedResponseComponent.Reset();
