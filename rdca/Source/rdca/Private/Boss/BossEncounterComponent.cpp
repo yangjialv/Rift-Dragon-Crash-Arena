@@ -446,15 +446,33 @@ void UBossEncounterComponent::TryDamagePlayer(
 
 	const FVector FromBoss = PlayerPawn->GetActorLocation() - GetOwner()->GetActorLocation();
 	const float HorizontalDistance = FVector(FromBoss.X, FromBoss.Y, 0.0f).Size();
-	const float HeightAboveBossFloor = FromBoss.Z;
-	if (HorizontalDistance >= PreviousRadius
-		&& HorizontalDistance <= CurrentRadius
-		&& HeightAboveBossFloor <= GroundDamageMaximumHeight)
+	const float ShockwaveFloorZ = ShockwaveVisual.IsValid()
+		? ShockwaveVisual->GetComponentLocation().Z
+		: GetOwner()->GetActorLocation().Z;
+	const float HeightAboveShockwave =
+		PlayerPawn->GetActorLocation().Z - ShockwaveFloorZ;
+	const bool bWaveReachedPlayer =
+		HorizontalDistance + ShockwaveHitTolerance >= PreviousRadius
+		&& HorizontalDistance - ShockwaveHitTolerance <= CurrentRadius;
+	const bool bPlayerIsGroundedEnough =
+		FMath::Abs(HeightAboveShockwave) <= GroundDamageMaximumHeight;
+	if (bWaveReachedPlayer && bPlayerIsGroundedEnough)
 	{
 		if (UPlayerHealthComponent* Health =
 				PlayerPawn->FindComponentByClass<UPlayerHealthComponent>())
 		{
 			bPlayerDamagedThisAttack = Health->ReceiveDamage(ShockwaveDamage);
+			if (bPlayerDamagedThisAttack)
+			{
+				UE_LOG(
+					LogRDCAPlayer,
+					Log,
+					TEXT("Boss shockwave hit. Player=%s Radius=%.1f Distance=%.1f Height=%.1f"),
+					*GetNameSafe(PlayerPawn),
+					CurrentRadius,
+					HorizontalDistance,
+					HeightAboveShockwave);
+			}
 		}
 	}
 }

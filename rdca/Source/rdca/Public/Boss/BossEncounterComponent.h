@@ -142,6 +142,11 @@ protected:
 	float GroundDamageMaximumHeight = 140.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Shockwave",
+		meta = (ClampMin = "0.0",
+			ToolTip = "Gameplay thickness added around the expanding shockwave radius to avoid frame-step misses."))
+	float ShockwaveHitTolerance = 60.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Shockwave",
 		meta = (ClampMin = "1"))
 	int32 ShockwaveDamage = 1;
 

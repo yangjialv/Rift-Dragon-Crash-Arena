@@ -42,6 +42,10 @@ protected:
 		meta = (ClampMin = "0.1"))
 	float LifeSeconds = 5.0f;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Projectile|Anchor",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float AnchorOverloadAmount = 0.2f;
+
 private:
 	FVector TravelDirection = FVector::ForwardVector;
 	float TravelSpeed = 900.0f;

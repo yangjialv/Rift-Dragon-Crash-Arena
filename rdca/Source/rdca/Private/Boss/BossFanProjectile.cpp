@@ -1,5 +1,6 @@
 #include "Boss/BossFanProjectile.h"
 
+#include "Arena/AnchorOverloadComponent.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Player/PlayerHealthComponent.h"
@@ -18,6 +19,7 @@ ABossFanProjectile::ABossFanProjectile()
 	CollisionComponent->SetCollisionObjectType(ECC_WorldDynamic);
 	CollisionComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
 	CollisionComponent->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+	CollisionComponent->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Overlap);
 	CollisionComponent->OnComponentBeginOverlap.AddDynamic(
 		this,
 		&ABossFanProjectile::HandleProjectileOverlap);
@@ -59,6 +61,11 @@ void ABossFanProjectile::InitializeProjectile(
 	TravelDirection = WorldDirection.GetSafeNormal();
 	TravelSpeed = FMath::Max(NewSpeed, 1.0f);
 	Damage = FMath::Max(NewDamage, 1);
+	CollisionComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	CollisionComponent->SetGenerateOverlapEvents(true);
+	CollisionComponent->SetCollisionResponseToChannel(
+		ECC_WorldDynamic,
+		ECR_Overlap);
 	SetLifeSpan(FMath::Max(LifeSeconds, 0.1f));
 	SetActorRotation(TravelDirection.Rotation());
 }
@@ -78,6 +85,21 @@ void ABossFanProjectile::HandleProjectileOverlap(
 
 	UPlayerHealthComponent* Health =
 		OtherActor->FindComponentByClass<UPlayerHealthComponent>();
+	if (UAnchorOverloadComponent* AnchorOverload =
+			OtherActor->FindComponentByClass<UAnchorOverloadComponent>())
+	{
+		bHasAppliedDamage = true;
+		AnchorOverload->AddOverloadAmount(AnchorOverloadAmount);
+		UE_LOG(
+			LogRDCAPlayer,
+			Log,
+			TEXT("Boss fan projectile overloaded anchor. Anchor=%s Amount=%.2f"),
+			*GetNameSafe(OtherActor),
+			AnchorOverloadAmount);
+		Destroy();
+		return;
+	}
+
 	if (!Health)
 	{
 		return;

@@ -53,6 +53,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Anchor|Overload")
 	float GetWarningRemainingTime() const;
 
+	UFUNCTION(BlueprintPure, Category = "Anchor|Overload")
+	float GetOverloadAlpha() const { return CurrentOverloadAlpha; }
+
+	UFUNCTION(BlueprintCallable, Category = "Anchor|Overload")
+	void AddOverloadAmount(float NormalizedAmount);
+
 	UPROPERTY(BlueprintAssignable, Category = "Anchor|Overload")
 	FOnAnchorOverloadStateChanged OnOverloadStateChanged;
 
@@ -96,5 +102,6 @@ private:
 	TWeakObjectPtr<AActor> SpawnedFractureActor;
 	TObjectPtr<UMaterialInstanceDynamic> OverloadMaterialInstance;
 	EAnchorOverloadState OverloadState = EAnchorOverloadState::Normal;
+	float CurrentOverloadAlpha = 0.0f;
 	float StateElapsed = 0.0f;
 };

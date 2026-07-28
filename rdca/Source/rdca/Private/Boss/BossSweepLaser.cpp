@@ -1,5 +1,6 @@
 #include "Boss/BossSweepLaser.h"
 
+#include "Arena/AnchorOverloadComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -22,6 +23,7 @@ ABossSweepLaser::ABossSweepLaser()
 	DamageVolume->SetCollisionObjectType(ECC_WorldDynamic);
 	DamageVolume->SetCollisionResponseToAllChannels(ECR_Ignore);
 	DamageVolume->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+	DamageVolume->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Overlap);
 	DamageVolume->OnComponentBeginOverlap.AddDynamic(
 		this,
 		&ABossSweepLaser::HandleLaserOverlap);
@@ -58,6 +60,11 @@ void ABossSweepLaser::InitializeLaser(
 	EndYaw = NewEndYaw;
 	SweepDuration = FMath::Max(NewSweepDuration, 0.1f);
 	Damage = FMath::Max(NewDamage, 1);
+	DamageVolume->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	DamageVolume->SetGenerateOverlapEvents(true);
+	DamageVolume->SetCollisionResponseToChannel(
+		ECC_WorldDynamic,
+		ECR_Overlap);
 	SetActorRotation(FRotator(0.0f, StartYaw, 0.0f));
 	UpdateComponentDimensions();
 	LaserEffect->DeactivateImmediate();
@@ -105,6 +112,7 @@ void ABossSweepLaser::Tick(const float DeltaTime)
 		0.0f,
 		FMath::Lerp(StartYaw, EndYaw, Alpha),
 		0.0f));
+	ApplyAnchorOverload(DeltaTime);
 
 	if (Alpha >= 1.0f)
 	{
@@ -123,6 +131,28 @@ void ABossSweepLaser::HandleLaserOverlap(
 	if (bLaserActive)
 	{
 		ApplyDamageToActor(OtherActor);
+	}
+}
+
+void ABossSweepLaser::ApplyAnchorOverload(const float DeltaTime)
+{
+	if (AnchorOverloadPerSecond <= 0.0f)
+	{
+		return;
+	}
+
+	TArray<AActor*> OverlappingActors;
+	DamageVolume->GetOverlappingActors(OverlappingActors);
+	for (AActor* Actor : OverlappingActors)
+	{
+		if (UAnchorOverloadComponent* AnchorOverload =
+				Actor
+					? Actor->FindComponentByClass<UAnchorOverloadComponent>()
+					: nullptr)
+		{
+			AnchorOverload->AddOverloadAmount(
+				AnchorOverloadPerSecond * DeltaTime);
+		}
 	}
 }
 

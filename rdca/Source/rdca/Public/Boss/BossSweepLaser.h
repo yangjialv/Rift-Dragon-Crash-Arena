@@ -77,8 +77,13 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Laser|Visual")
 	FRotator VisualRotationOffset = FRotator::ZeroRotator;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Laser|Anchor",
+		meta = (ClampMin = "0.0"))
+	float AnchorOverloadPerSecond = 0.35f;
+
 private:
 	void ApplyDamageToActor(AActor* OtherActor);
+	void ApplyAnchorOverload(float DeltaTime);
 	void UpdateComponentDimensions();
 
 	TSet<TWeakObjectPtr<AActor>> DamagedActors;

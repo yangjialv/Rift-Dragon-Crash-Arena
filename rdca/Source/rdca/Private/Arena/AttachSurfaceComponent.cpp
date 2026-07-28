@@ -12,6 +12,7 @@ UAttachSurfaceComponent::UAttachSurfaceComponent(
 	BodyInstance.SetResponseToAllChannels(ECR_Ignore);
 	BodyInstance.SetResponseToChannel(ECC_Pawn, ECR_Block);
 	BodyInstance.SetResponseToChannel(ECC_Visibility, ECR_Block);
+	BodyInstance.SetResponseToChannel(ECC_WorldDynamic, ECR_Overlap);
 }
 
 EAttachBoxFace UAttachSurfaceComponent::GetFaceFromWorldNormal(

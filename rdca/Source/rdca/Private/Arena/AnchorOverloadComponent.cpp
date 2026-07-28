@@ -20,6 +20,14 @@ void UAnchorOverloadComponent::BeginPlay()
 	Super::BeginPlay();
 
 	AttachSurface = GetOwner()->FindComponentByClass<UAttachSurfaceComponent>();
+	if (AttachSurface.IsValid())
+	{
+		AttachSurface->SetCollisionObjectType(ECC_WorldDynamic);
+		AttachSurface->SetCollisionResponseToChannel(
+			ECC_WorldDynamic,
+			ECR_Overlap);
+		AttachSurface->SetGenerateOverlapEvents(true);
+	}
 	TArray<UStaticMeshComponent*> MeshComponents;
 	GetOwner()->GetComponents<UStaticMeshComponent>(MeshComponents);
 	for (UStaticMeshComponent* Mesh : MeshComponents)
@@ -68,37 +76,11 @@ void UAnchorOverloadComponent::TickComponent(
 		return;
 	}
 
-	if (!AttachedPlayer.IsValid())
+	if (AttachedPlayer.IsValid())
 	{
-		UpdateOverloadMaterial(0.0f);
-		return;
-	}
-
-	StateElapsed += DeltaTime;
-	const float OverloadAlpha =
-		OverloadState == EAnchorOverloadState::Warning
-			? FMath::Lerp(
-				0.5f,
-				1.0f,
-				FMath::Clamp(StateElapsed / WarningDuration, 0.0f, 1.0f))
-			: FMath::Lerp(
-				0.0f,
-				0.5f,
-				FMath::Clamp(
-					StateElapsed / SafeAttachmentDuration,
-					0.0f,
-					1.0f));
-	UpdateOverloadMaterial(OverloadAlpha);
-
-	if (OverloadState == EAnchorOverloadState::Normal
-		&& StateElapsed >= SafeAttachmentDuration)
-	{
-		SetOverloadState(EAnchorOverloadState::Warning);
-	}
-	else if (OverloadState == EAnchorOverloadState::Warning
-		&& StateElapsed >= WarningDuration)
-	{
-		TriggerOverload();
+		const float FullAttachmentDuration =
+			FMath::Max(SafeAttachmentDuration + WarningDuration, 0.1f);
+		AddOverloadAmount(DeltaTime / FullAttachmentDuration);
 	}
 }
 
@@ -110,8 +92,6 @@ void UAnchorOverloadComponent::NotifyPlayerAttached(APawn* PlayerPawn)
 	}
 
 	AttachedPlayer = PlayerPawn;
-	StateElapsed = 0.0f;
-	SetOverloadState(EAnchorOverloadState::Normal);
 }
 
 void UAnchorOverloadComponent::NotifyPlayerDetached(APawn* PlayerPawn)
@@ -122,18 +102,48 @@ void UAnchorOverloadComponent::NotifyPlayerDetached(APawn* PlayerPawn)
 	}
 
 	AttachedPlayer.Reset();
-	if (OverloadState != EAnchorOverloadState::Recovering)
-	{
-		StateElapsed = 0.0f;
-		SetOverloadState(EAnchorOverloadState::Normal);
-	}
 }
 
 float UAnchorOverloadComponent::GetWarningRemainingTime() const
 {
 	return OverloadState == EAnchorOverloadState::Warning
-		? FMath::Max(WarningDuration - StateElapsed, 0.0f)
+		? (1.0f - CurrentOverloadAlpha)
+			* FMath::Max(SafeAttachmentDuration + WarningDuration, 0.1f)
 		: 0.0f;
+}
+
+void UAnchorOverloadComponent::AddOverloadAmount(
+	const float NormalizedAmount)
+{
+	if (NormalizedAmount <= 0.0f
+		|| OverloadState == EAnchorOverloadState::Recovering)
+	{
+		return;
+	}
+
+	CurrentOverloadAlpha = FMath::Clamp(
+		CurrentOverloadAlpha + NormalizedAmount,
+		0.0f,
+		1.0f);
+	UpdateOverloadMaterial(CurrentOverloadAlpha);
+
+	if (CurrentOverloadAlpha >= 1.0f)
+	{
+		TriggerOverload();
+	}
+	else
+	{
+		const float FullAttachmentDuration =
+			FMath::Max(SafeAttachmentDuration + WarningDuration, 0.1f);
+		const float WarningThreshold = FMath::Clamp(
+			SafeAttachmentDuration / FullAttachmentDuration,
+			0.0f,
+			1.0f);
+		SetOverloadState(
+			CurrentOverloadAlpha >= WarningThreshold
+				? EAnchorOverloadState::Warning
+				: EAnchorOverloadState::Normal);
+	}
 }
 
 void UAnchorOverloadComponent::SetOverloadState(
@@ -150,7 +160,7 @@ void UAnchorOverloadComponent::SetOverloadState(
 
 	if (NewState == EAnchorOverloadState::Normal)
 	{
-		UpdateOverloadMaterial(0.0f);
+		UpdateOverloadMaterial(CurrentOverloadAlpha);
 	}
 
 	OnOverloadStateChanged.Broadcast(PreviousState, NewState);
@@ -222,6 +232,7 @@ void UAnchorOverloadComponent::FinishRecovery()
 		SpawnedFractureActor->Destroy();
 	}
 	SpawnedFractureActor.Reset();
+	CurrentOverloadAlpha = 0.0f;
 	SetAnchorAvailable(true);
 	SetOverloadState(EAnchorOverloadState::Normal);
 }
