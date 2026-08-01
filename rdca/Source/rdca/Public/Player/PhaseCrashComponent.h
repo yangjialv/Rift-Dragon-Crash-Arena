@@ -131,7 +131,12 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Ground Dash",
 		meta = (ClampMin = "0.0"))
-	float GroundDashCooldown = 0.5f;
+	float GroundDashCooldown = 0.25f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Input Buffer",
+		meta = (ClampMin = "0.0",
+			ToolTip = "How long a ground-dash press is remembered while the action is unavailable."))
+	float DashInputBufferDuration = 0.6f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Trajectory",
 		meta = (ClampMin = "0.0"))
@@ -151,11 +156,11 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Timing",
 		meta = (ClampMin = "0.0"))
-	float RecoveryDuration = 0.15f;
+	float RecoveryDuration = 0.08f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Timing",
 		meta = (ClampMin = "0.0"))
-	float CooldownDuration = 1.0f;
+	float CooldownDuration = 0.45f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Charge",
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
@@ -213,6 +218,8 @@ private:
 		const FVector& WorldContactPoint,
 		const FVector& WorldImpactNormal);
 	void SetCrashState(EPhaseCrashState NewState);
+	void BeginCrashAim();
+	void ConsumeBufferedInputs(float DeltaTime);
 
 	TObjectPtr<APawn> OwnerPawn;
 	TWeakObjectPtr<AActor> AttachedActor;
@@ -224,6 +231,9 @@ private:
 	bool bChargingFromAttachment = false;
 	bool bActiveCrashFromAttachment = false;
 	bool bWeakPointDamageAppliedThisCrash = false;
+	bool bCrashInputHeld = false;
+	bool bCrashInputBuffered = false;
+	float DashInputBufferRemaining = 0.0f;
 	FVector AttachedSurfaceOriginLocal = FVector::ZeroVector;
 	FVector AttachedSurfaceOutLocal = FVector::ForwardVector;
 	FVector AttachedSurfaceUpLocal = FVector::UpVector;

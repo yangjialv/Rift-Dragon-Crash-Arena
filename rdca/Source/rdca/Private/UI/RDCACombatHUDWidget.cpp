@@ -13,28 +13,41 @@
 
 namespace
 {
-FText GetBossStateText(const EBossEncounterState State)
+FText GetBossAttackText(const EBossAttackType Attack)
+{
+	switch (Attack)
+	{
+	case EBossAttackType::Shockwave:
+		return FText::FromString(TEXT("SHOCKWAVE"));
+	case EBossAttackType::AimedVolley:
+		return FText::FromString(TEXT("AIMED VOLLEY"));
+	case EBossAttackType::SweepLaser:
+		return FText::FromString(TEXT("LASER SWEEP"));
+	default:
+		return FText::FromString(TEXT("ATTACK"));
+	}
+}
+
+FText GetBossStateText(
+	const EBossEncounterState State,
+	const EBossAttackType Attack)
 {
 	switch (State)
 	{
 	case EBossEncounterState::Idle:
 		return FText::FromString(TEXT("IDLE"));
-	case EBossEncounterState::PreparingAttack:
-		return FText::FromString(TEXT("WARNING"));
+	case EBossEncounterState::SelectingAttack:
+		return FText::FromString(TEXT("READING PLAYER"));
+	case EBossEncounterState::Preparing:
+		return FText::Format(
+			FText::FromString(TEXT("{0} WARNING")),
+			GetBossAttackText(Attack));
 	case EBossEncounterState::Attacking:
-		return FText::FromString(TEXT("SHOCKWAVE"));
+		return GetBossAttackText(Attack);
 	case EBossEncounterState::Recovery:
 		return FText::FromString(TEXT("RECOVERY"));
 	case EBossEncounterState::WeakPointExposed:
 		return FText::FromString(TEXT("WEAK POINT EXPOSED"));
-	case EBossEncounterState::PreparingFanAttack:
-		return FText::FromString(TEXT("FAN ATTACK WARNING"));
-	case EBossEncounterState::FanAttacking:
-		return FText::FromString(TEXT("FAN ATTACK"));
-	case EBossEncounterState::PreparingLaserAttack:
-		return FText::FromString(TEXT("LASER WARNING"));
-	case EBossEncounterState::LaserAttacking:
-		return FText::FromString(TEXT("LASER SWEEP"));
 	case EBossEncounterState::Dead:
 		return FText::FromString(TEXT("BOSS DEFEATED"));
 	default:
@@ -181,7 +194,9 @@ void URDCACombatHUDWidget::UpdateHUD()
 	if (BossEncounter.IsValid() && TXT_BossState)
 	{
 		TXT_BossState->SetText(
-			GetBossStateText(BossEncounter->GetEncounterState()));
+			GetBossStateText(
+				BossEncounter->GetEncounterState(),
+				BossEncounter->GetCurrentAttack()));
 	}
 
 	const ARDCAPlayerController* RDCAController =

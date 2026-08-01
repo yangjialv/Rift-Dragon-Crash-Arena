@@ -7,6 +7,7 @@
 #include "Components/PrimitiveComponent.h"
 #include "DrawDebugHelpers.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/PawnMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "rdca.h"
 
@@ -112,6 +113,8 @@ void UPhaseCrashComponent::TickComponent(
 		break;
 	}
 
+	ConsumeBufferedInputs(DeltaTime);
+
 	if (CrashState != EPhaseCrashState::Crashing
 		&& CrashState != EPhaseCrashState::Attached
 		&& !bChargingFromAttachment)
@@ -122,9 +125,32 @@ void UPhaseCrashComponent::TickComponent(
 
 void UPhaseCrashComponent::StartCharging()
 {
-	if ((CrashState != EPhaseCrashState::Ready
-			&& CrashState != EPhaseCrashState::Attached)
-		|| !OwnerPawn)
+	if (!OwnerPawn)
+	{
+		return;
+	}
+	bCrashInputHeld = true;
+	bCrashInputBuffered = true;
+	if (CrashState != EPhaseCrashState::Ready
+		&& CrashState != EPhaseCrashState::Attached)
+	{
+		UE_LOG(
+			LogRDCAPlayer,
+			Verbose,
+			TEXT("Crash aim buffered. State=%d Cooldown=%.2f"),
+			static_cast<int32>(CrashState),
+			CooldownRemaining);
+		return;
+	}
+
+	BeginCrashAim();
+}
+
+void UPhaseCrashComponent::BeginCrashAim()
+{
+	if (!OwnerPawn
+		|| (CrashState != EPhaseCrashState::Ready
+			&& CrashState != EPhaseCrashState::Attached))
 	{
 		return;
 	}
@@ -134,14 +160,21 @@ void UPhaseCrashComponent::StartCharging()
 	{
 		return;
 	}
+	bCrashInputBuffered = false;
+	if (UPawnMovementComponent* Movement = OwnerPawn->GetMovementComponent())
+	{
+		Movement->StopMovementImmediately();
+	}
 	DragStartAimTarget = AimTarget;
 	SetCrashState(EPhaseCrashState::Charging);
 }
 
 void UPhaseCrashComponent::ReleaseCrash()
 {
+	bCrashInputHeld = false;
 	if (CrashState != EPhaseCrashState::Charging || !OwnerPawn)
 	{
+		bCrashInputBuffered = false;
 		return;
 	}
 
@@ -174,6 +207,8 @@ void UPhaseCrashComponent::ReleaseCrash()
 
 void UPhaseCrashComponent::CancelCharging()
 {
+	bCrashInputHeld = false;
+	bCrashInputBuffered = false;
 	if (CrashState == EPhaseCrashState::Charging)
 	{
 		const bool bReturnToAttachment =
@@ -192,12 +227,21 @@ void UPhaseCrashComponent::StartGroundDash()
 			&& CrashState != EPhaseCrashState::Attached)
 		|| !OwnerPawn)
 	{
+		if (OwnerPawn)
+		{
+			DashInputBufferRemaining = DashInputBufferDuration;
+		}
 		return;
 	}
+	DashInputBufferRemaining = 0.0f;
 
 	if (!UpdateAimTarget())
 	{
 		return;
+	}
+	if (UPawnMovementComponent* Movement = OwnerPawn->GetMovementComponent())
+	{
+		Movement->StopMovementImmediately();
 	}
 
 	DetachFromCrashTarget();
@@ -231,6 +275,30 @@ void UPhaseCrashComponent::StartGroundDash()
 		TEXT("Ground dash started. Distance=%.1f Duration=%.2f"),
 		TravelDistance,
 		CrashDuration);
+}
+
+void UPhaseCrashComponent::ConsumeBufferedInputs(const float DeltaTime)
+{
+	DashInputBufferRemaining = FMath::Max(
+		DashInputBufferRemaining - DeltaTime,
+		0.0f);
+	const bool bActionAvailable =
+		CrashState == EPhaseCrashState::Ready
+		|| CrashState == EPhaseCrashState::Attached;
+	if (!bActionAvailable)
+	{
+		return;
+	}
+
+	if (bCrashInputBuffered && bCrashInputHeld)
+	{
+		BeginCrashAim();
+		return;
+	}
+	if (DashInputBufferRemaining > 0.0f)
+	{
+		StartGroundDash();
+	}
 }
 
 void UPhaseCrashComponent::MoveAttached(const FVector2D& MovementInput)

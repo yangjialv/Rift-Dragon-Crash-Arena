@@ -23,3 +23,19 @@ Run `tools/parse_combat_log.py` against the latest Unreal log to generate this r
 - [ ] A grounded player takes shockwave damage when the expanding ring reaches them.
 - [ ] A player above `GroundDamageMaximumHeight` avoids shockwave damage.
 - [ ] Shockwave logs report radius, player distance, and height on a successful hit.
+
+## Manual Test: Boss Phase 1 Decision State Machine
+
+- [ ] HUD distinguishes Preparing, Attacking, Recovery, and Weak Point Exposed.
+- [ ] The same attack is never selected twice in succession.
+- [ ] A grounded player increases the frequency of Shockwave and AimedVolley.
+- [ ] An attached player increases the frequency of SweepLaser.
+- [ ] AimedVolley and Laser keep the target selected at the start of their warning.
+- [ ] Moving during the warning does not retarget the attack.
+- [ ] The weak point is exposed after two completed attacks, not after every attack.
+- [ ] Existing Shockwave, projectile, Laser visual, damage, and cleanup still work.
+- [ ] Holding crash during cooldown starts aiming on the first available frame.
+- [ ] Releasing crash before cooldown completes cancels the buffered request.
+- [ ] A dash pressed shortly before availability executes once and is not repeated.
+- [ ] AimedVolley fires three faster projectiles toward the locked center/left/right targets.
+- [ ] Logs contain phase, player spatial state, weights, previous attack, selected attack, and seed.

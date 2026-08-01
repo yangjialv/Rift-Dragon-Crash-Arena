@@ -9,6 +9,7 @@
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInterface.h"
+#include "Player/PhaseCrashComponent.h"
 #include "Player/PlayerHealthComponent.h"
 #include "rdca.h"
 
@@ -17,6 +18,25 @@ UBossEncounterComponent::UBossEncounterComponent()
 	PrimaryComponentTick.bCanEverTick = true;
 	FanProjectileClass = ABossFanProjectile::StaticClass();
 	SweepLaserClass = ABossSweepLaser::StaticClass();
+	AirborneAttackWeights.Shockwave = 10.0f;
+	AirborneAttackWeights.AimedVolley = 30.0f;
+	AirborneAttackWeights.SweepLaser = 35.0f;
+	AttachedAttackWeights.Shockwave = 5.0f;
+	AttachedAttackWeights.AimedVolley = 10.0f;
+	AttachedAttackWeights.SweepLaser = 40.0f;
+}
+
+EBossCombatPhase UBossEncounterComponent::GetCombatPhase() const
+{
+	if (!WeakPoint.IsValid() || WeakPoint->IsBossDefeated())
+	{
+		return WeakPoint.IsValid()
+			? EBossCombatPhase::Dead
+			: EBossCombatPhase::Phase1;
+	}
+	return WeakPoint->GetCurrentHitPoints() <= 1
+		? EBossCombatPhase::Phase2
+		: EBossCombatPhase::Phase1;
 }
 
 float UBossEncounterComponent::GetStateProgress() const
@@ -38,22 +58,16 @@ float UBossEncounterComponent::GetCurrentStateDuration() const
 	{
 	case EBossEncounterState::Idle:
 		return InitialIdleDuration;
-	case EBossEncounterState::PreparingAttack:
-		return WarningDuration;
+	case EBossEncounterState::SelectingAttack:
+		return 0.0f;
+	case EBossEncounterState::Preparing:
+		return GetCurrentAttackWarningDuration();
 	case EBossEncounterState::Attacking:
-		return AttackDuration;
+		return GetCurrentAttackActiveDuration();
 	case EBossEncounterState::Recovery:
 		return RecoveryDuration;
 	case EBossEncounterState::WeakPointExposed:
 		return WeakPointExposedDuration;
-	case EBossEncounterState::PreparingFanAttack:
-		return FanWarningDuration;
-	case EBossEncounterState::FanAttacking:
-		return FanAttackDuration;
-	case EBossEncounterState::PreparingLaserAttack:
-		return LaserWarningDuration;
-	case EBossEncounterState::LaserAttacking:
-		return LaserSweepDuration;
 	case EBossEncounterState::Dead:
 	default:
 		return 0.0f;
@@ -92,6 +106,11 @@ void UBossEncounterComponent::BeginPlay()
 			ShockwaveVisual.IsValid() ? TEXT("found") : TEXT("missing"));
 	}
 
+	ActiveAttackRandomSeed =
+		AttackSelectionRandomSeed >= 0
+			? AttackSelectionRandomSeed
+			: FMath::Rand();
+	AttackRandomStream.Initialize(ActiveAttackRandomSeed);
 	SetEncounterState(EBossEncounterState::Idle);
 }
 
@@ -119,18 +138,31 @@ void UBossEncounterComponent::TickComponent(
 	case EBossEncounterState::Idle:
 		if (StateElapsed >= InitialIdleDuration)
 		{
-			SetEncounterState(EBossEncounterState::PreparingAttack);
+			SetEncounterState(EBossEncounterState::SelectingAttack);
 		}
 		break;
-	case EBossEncounterState::PreparingAttack:
-		if (StateElapsed >= WarningDuration)
+	case EBossEncounterState::SelectingAttack:
+		SelectNextAttack();
+		break;
+	case EBossEncounterState::Preparing:
+		if (StateElapsed >= GetCurrentAttackWarningDuration())
 		{
 			SetEncounterState(EBossEncounterState::Attacking);
 		}
 		break;
 	case EBossEncounterState::Attacking:
-		UpdateShockwave(FMath::Clamp(StateElapsed / AttackDuration, 0.0f, 1.0f));
-		if (StateElapsed >= AttackDuration)
+		if (CurrentAttack == EBossAttackType::Shockwave)
+		{
+			UpdateShockwave(FMath::Clamp(
+				StateElapsed / FMath::Max(ShockwaveAttackDuration, 0.1f),
+				0.0f,
+				1.0f));
+		}
+		else if (CurrentAttack == EBossAttackType::AimedVolley)
+		{
+			TickAimedVolley(DeltaTime);
+		}
+		if (StateElapsed >= GetCurrentAttackActiveDuration())
 		{
 			SetEncounterState(EBossEncounterState::Recovery);
 		}
@@ -138,50 +170,23 @@ void UBossEncounterComponent::TickComponent(
 	case EBossEncounterState::Recovery:
 		if (StateElapsed >= RecoveryDuration)
 		{
-			SetEncounterState(EBossEncounterState::WeakPointExposed);
+			++CompletedAttacksSinceExposure;
+			if (CompletedAttacksSinceExposure
+				>= FMath::Max(AttacksBeforeWeakPointExposure, 1))
+			{
+				SetEncounterState(EBossEncounterState::WeakPointExposed);
+			}
+			else
+			{
+				SetEncounterState(EBossEncounterState::SelectingAttack);
+			}
 		}
 		break;
 	case EBossEncounterState::WeakPointExposed:
 		if (StateElapsed >= WeakPointExposedDuration)
 		{
-			switch (NextAttackPattern)
-			{
-			case 1:
-				SetEncounterState(EBossEncounterState::PreparingFanAttack);
-				break;
-			case 2:
-				SetEncounterState(EBossEncounterState::PreparingLaserAttack);
-				break;
-			case 0:
-			default:
-				SetEncounterState(EBossEncounterState::PreparingAttack);
-				break;
-			}
-			NextAttackPattern = (NextAttackPattern + 1) % 3;
-		}
-		break;
-	case EBossEncounterState::PreparingFanAttack:
-		if (StateElapsed >= FanWarningDuration)
-		{
-			SetEncounterState(EBossEncounterState::FanAttacking);
-		}
-		break;
-	case EBossEncounterState::FanAttacking:
-		if (StateElapsed >= FanAttackDuration)
-		{
-			SetEncounterState(EBossEncounterState::Recovery);
-		}
-		break;
-	case EBossEncounterState::PreparingLaserAttack:
-		if (StateElapsed >= LaserWarningDuration)
-		{
-			SetEncounterState(EBossEncounterState::LaserAttacking);
-		}
-		break;
-	case EBossEncounterState::LaserAttacking:
-		if (StateElapsed >= LaserSweepDuration)
-		{
-			SetEncounterState(EBossEncounterState::Recovery);
+			CompletedAttacksSinceExposure = 0;
+			SetEncounterState(EBossEncounterState::SelectingAttack);
 		}
 		break;
 	default:
@@ -248,55 +253,21 @@ void UBossEncounterComponent::SetEncounterState(
 	}
 	UpdateWeakPointVisual(bExposed);
 
-	if (ShockwaveVisual.IsValid())
+	if (NewState == EBossEncounterState::Preparing)
 	{
-		const bool bShow =
-			NewState == EBossEncounterState::PreparingAttack
-			|| NewState == EBossEncounterState::Attacking;
-		ShockwaveVisual->SetVisibility(bShow);
-		if (NewState == EBossEncounterState::PreparingAttack)
-		{
-			ShockwaveVisual->SetRelativeScale3D(ShockwaveBaseScale);
-			if (ShockwaveWarningMaterial)
-			{
-				ShockwaveVisual->SetMaterial(0, ShockwaveWarningMaterial);
-			}
-		}
-		else if (NewState == EBossEncounterState::Attacking)
-		{
-			PreviousShockwaveRadius = 0.0f;
-			bPlayerDamagedThisAttack = false;
-			if (ShockwaveActiveMaterial)
-			{
-				ShockwaveVisual->SetMaterial(0, ShockwaveActiveMaterial);
-			}
-		}
+		BeginCurrentAttackWarning();
 	}
-
-	if (NewState == EBossEncounterState::FanAttacking)
+	else if (NewState == EBossEncounterState::Attacking)
 	{
-		SpawnFanProjectiles();
+		BeginCurrentAttack();
 	}
-	else if (NewState == EBossEncounterState::PreparingLaserAttack)
+	else if (NewState == EBossEncounterState::Recovery)
 	{
-		SpawnLaserWarning();
+		FinishCurrentAttack();
 	}
-	else if (NewState == EBossEncounterState::LaserAttacking
-		&& ActiveSweepLaser.IsValid())
+	else if (NewState == EBossEncounterState::Dead)
 	{
-		ActiveSweepLaser->ActivateLaser();
-	}
-	else if (NewState == EBossEncounterState::Recovery
-		&& ActiveSweepLaser.IsValid())
-	{
-		ActiveSweepLaser->Destroy();
-		ActiveSweepLaser.Reset();
-	}
-	else if (NewState == EBossEncounterState::Dead
-		&& ActiveSweepLaser.IsValid())
-	{
-		ActiveSweepLaser->Destroy();
-		ActiveSweepLaser.Reset();
+		FinishCurrentAttack();
 	}
 
 	OnEncounterStateChanged.Broadcast(PreviousState, NewState);
@@ -309,15 +280,232 @@ void UBossEncounterComponent::SetEncounterState(
 		static_cast<int32>(NewState));
 }
 
+void UBossEncounterComponent::SelectNextAttack()
+{
+	LastObservedPlayerState = ObservePlayerSpatialState();
+	if (const APawn* PlayerPawn =
+			UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
+	{
+		LockedTargetLocation = PlayerPawn->GetActorLocation();
+	}
+
+	const FBossAttackWeights& Weights =
+		GetWeightsForPlayerState(LastObservedPlayerState);
+	CurrentAttack = ChooseWeightedAttack(Weights);
+	UE_LOG(
+		LogRDCAPlayer,
+		Log,
+		TEXT("Boss attack selected. Boss=%s Phase=%d PlayerState=%d Weights=(Shockwave=%.1f AimedVolley=%.1f Laser=%.1f) Previous=%d Selected=%d Seed=%d"),
+		*GetNameSafe(GetOwner()),
+		static_cast<int32>(GetCombatPhase()),
+		static_cast<int32>(LastObservedPlayerState),
+		Weights.Shockwave,
+		Weights.AimedVolley,
+		Weights.SweepLaser,
+		static_cast<int32>(PreviousAttack),
+		static_cast<int32>(CurrentAttack),
+		ActiveAttackRandomSeed);
+	SetEncounterState(EBossEncounterState::Preparing);
+}
+
+EBossAttackType UBossEncounterComponent::ChooseWeightedAttack(
+	const FBossAttackWeights& Weights)
+{
+	struct FWeightedCandidate
+	{
+		EBossAttackType Attack = EBossAttackType::None;
+		float Weight = 0.0f;
+	};
+
+	TArray<FWeightedCandidate> Candidates;
+	Candidates.Add({EBossAttackType::Shockwave, Weights.Shockwave});
+	if (FanProjectileClass)
+	{
+		Candidates.Add({EBossAttackType::AimedVolley, Weights.AimedVolley});
+	}
+	if (SweepLaserClass)
+	{
+		Candidates.Add({EBossAttackType::SweepLaser, Weights.SweepLaser});
+	}
+
+	float TotalWithoutRepeat = 0.0f;
+	for (const FWeightedCandidate& Candidate : Candidates)
+	{
+		if (Candidate.Attack != PreviousAttack)
+		{
+			TotalWithoutRepeat += FMath::Max(Candidate.Weight, 0.0f);
+		}
+	}
+	const bool bCanAvoidRepeat = TotalWithoutRepeat > 0.0f;
+	float TotalWeight = 0.0f;
+	for (const FWeightedCandidate& Candidate : Candidates)
+	{
+		if (!bCanAvoidRepeat || Candidate.Attack != PreviousAttack)
+		{
+			TotalWeight += FMath::Max(Candidate.Weight, 0.0f);
+		}
+	}
+	if (TotalWeight <= UE_KINDA_SMALL_NUMBER)
+	{
+		return EBossAttackType::Shockwave;
+	}
+
+	float Roll = AttackRandomStream.FRandRange(0.0f, TotalWeight);
+	for (const FWeightedCandidate& Candidate : Candidates)
+	{
+		if (bCanAvoidRepeat && Candidate.Attack == PreviousAttack)
+		{
+			continue;
+		}
+		Roll -= FMath::Max(Candidate.Weight, 0.0f);
+		if (Roll <= 0.0f)
+		{
+			return Candidate.Attack;
+		}
+	}
+	return Candidates.Last().Attack;
+}
+
+EPlayerSpatialState UBossEncounterComponent::ObservePlayerSpatialState() const
+{
+	const APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+	if (!PlayerPawn)
+	{
+		return EPlayerSpatialState::Grounded;
+	}
+	if (const UPhaseCrashComponent* PhaseCrash =
+			PlayerPawn->FindComponentByClass<UPhaseCrashComponent>())
+	{
+		if (PhaseCrash->IsAttached())
+		{
+			return EPlayerSpatialState::Attached;
+		}
+		if (PhaseCrash->IsCrashing())
+		{
+			return EPlayerSpatialState::Airborne;
+		}
+	}
+
+	const float FloorZ = ShockwaveVisual.IsValid()
+		? ShockwaveVisual->GetComponentLocation().Z
+		: GetOwner()->GetActorLocation().Z;
+	return FMath::Abs(PlayerPawn->GetActorLocation().Z - FloorZ)
+			> GroundDamageMaximumHeight
+		? EPlayerSpatialState::Airborne
+		: EPlayerSpatialState::Grounded;
+}
+
+const FBossAttackWeights& UBossEncounterComponent::GetWeightsForPlayerState(
+	const EPlayerSpatialState PlayerState) const
+{
+	switch (PlayerState)
+	{
+	case EPlayerSpatialState::Airborne:
+		return AirborneAttackWeights;
+	case EPlayerSpatialState::Attached:
+		return AttachedAttackWeights;
+	case EPlayerSpatialState::Grounded:
+	default:
+		return GroundedAttackWeights;
+	}
+}
+
+float UBossEncounterComponent::GetCurrentAttackWarningDuration() const
+{
+	switch (CurrentAttack)
+	{
+	case EBossAttackType::AimedVolley:
+		return AimedVolleyWarningDuration;
+	case EBossAttackType::SweepLaser:
+		return LaserWarningDuration;
+	case EBossAttackType::Shockwave:
+	default:
+		return WarningDuration;
+	}
+}
+
+float UBossEncounterComponent::GetCurrentAttackActiveDuration() const
+{
+	switch (CurrentAttack)
+	{
+	case EBossAttackType::AimedVolley:
+		return FMath::Max(
+			AimedVolleyAttackDuration,
+			(AimedVolleyProjectileCount - 1) * AimedVolleyShotInterval + 0.05f);
+	case EBossAttackType::SweepLaser:
+		return LaserSweepDuration;
+	case EBossAttackType::Shockwave:
+	default:
+		return ShockwaveAttackDuration;
+	}
+}
+
+void UBossEncounterComponent::BeginCurrentAttackWarning()
+{
+	if (ShockwaveVisual.IsValid())
+	{
+		const bool bShockwave = CurrentAttack == EBossAttackType::Shockwave;
+		ShockwaveVisual->SetVisibility(bShockwave);
+		if (bShockwave)
+		{
+			ShockwaveVisual->SetRelativeScale3D(ShockwaveBaseScale);
+			if (ShockwaveWarningMaterial)
+			{
+				ShockwaveVisual->SetMaterial(0, ShockwaveWarningMaterial);
+			}
+		}
+	}
+	if (CurrentAttack == EBossAttackType::SweepLaser)
+	{
+		SpawnLaserWarning();
+	}
+}
+
+void UBossEncounterComponent::BeginCurrentAttack()
+{
+	switch (CurrentAttack)
+	{
+	case EBossAttackType::Shockwave:
+		PreviousShockwaveRadius = 0.0f;
+		bPlayerDamagedThisAttack = false;
+		if (ShockwaveVisual.IsValid() && ShockwaveActiveMaterial)
+		{
+			ShockwaveVisual->SetMaterial(0, ShockwaveActiveMaterial);
+		}
+		break;
+	case EBossAttackType::AimedVolley:
+		AimedVolleyShotsFired = 0;
+		AimedVolleyShotElapsed = 0.0f;
+		SpawnAimedVolleyProjectile(AimedVolleyShotsFired++);
+		break;
+	case EBossAttackType::SweepLaser:
+		if (ActiveSweepLaser.IsValid())
+		{
+			ActiveSweepLaser->ActivateLaser();
+		}
+		break;
+	default:
+		break;
+	}
+}
+
+void UBossEncounterComponent::FinishCurrentAttack()
+{
+	if (ShockwaveVisual.IsValid())
+	{
+		ShockwaveVisual->SetVisibility(false);
+	}
+	if (ActiveSweepLaser.IsValid())
+	{
+		ActiveSweepLaser->Destroy();
+		ActiveSweepLaser.Reset();
+	}
+	PreviousAttack = CurrentAttack;
+}
+
 void UBossEncounterComponent::SpawnLaserWarning()
 {
 	if (!GetWorld() || !SweepLaserClass)
-	{
-		return;
-	}
-
-	APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-	if (!PlayerPawn)
 	{
 		return;
 	}
@@ -328,7 +516,7 @@ void UBossEncounterComponent::SpawnLaserWarning()
 	}
 
 	const FVector SpawnLocation = GetOwner()->GetActorLocation();
-	FVector ToPlayer = PlayerPawn->GetActorLocation() - SpawnLocation;
+	FVector ToPlayer = LockedTargetLocation - SpawnLocation;
 	ToPlayer.Z = 0.0f;
 	const float CenterYaw = ToPlayer.Rotation().Yaw;
 	const float StartYaw = CenterYaw - LaserSweepDegrees * 0.5f;
@@ -354,66 +542,83 @@ void UBossEncounterComponent::SpawnLaserWarning()
 	}
 }
 
-void UBossEncounterComponent::SpawnFanProjectiles()
+void UBossEncounterComponent::TickAimedVolley(const float DeltaTime)
+{
+	if (AimedVolleyShotsFired >= FMath::Max(AimedVolleyProjectileCount, 1))
+	{
+		return;
+	}
+
+	AimedVolleyShotElapsed += DeltaTime;
+	const float Interval = FMath::Max(AimedVolleyShotInterval, 0.01f);
+	while (AimedVolleyShotElapsed >= Interval
+		&& AimedVolleyShotsFired < FMath::Max(AimedVolleyProjectileCount, 1))
+	{
+		AimedVolleyShotElapsed -= Interval;
+		SpawnAimedVolleyProjectile(AimedVolleyShotsFired++);
+	}
+}
+
+void UBossEncounterComponent::SpawnAimedVolleyProjectile(
+	const int32 ShotIndex)
 {
 	if (!GetWorld() || !FanProjectileClass)
 	{
 		return;
 	}
 
-	APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-	if (!PlayerPawn)
-	{
-		return;
-	}
-
 	const FVector SpawnLocation =
 		GetOwner()->GetActorLocation() + FVector(0.0f, 0.0f, 60.0f);
-	FVector CenterDirection = PlayerPawn->GetActorLocation() - SpawnLocation;
-	CenterDirection.Z = 0.0f;
-	if (!CenterDirection.Normalize())
+	FVector ForwardToTarget = LockedTargetLocation - SpawnLocation;
+	if (!ForwardToTarget.Normalize())
 	{
 		return;
 	}
 
-	const int32 ProjectileCount = FMath::Max(FanProjectileCount, 1);
-	for (int32 Index = 0; Index < ProjectileCount; ++Index)
+	FVector LateralDirection = FVector::CrossProduct(
+		FVector::UpVector,
+		ForwardToTarget).GetSafeNormal();
+	if (LateralDirection.IsNearlyZero())
 	{
-		const float Alpha = ProjectileCount > 1
-			? static_cast<float>(Index) / (ProjectileCount - 1)
-			: 0.5f;
-		const float YawOffset =
-			FMath::Lerp(-FanSpreadDegrees * 0.5f, FanSpreadDegrees * 0.5f, Alpha);
-		const FVector Direction =
-			CenterDirection.RotateAngleAxis(YawOffset, FVector::UpVector);
+		LateralDirection = FVector::RightVector;
+	}
+	const int32 OffsetStep = (ShotIndex + 1) / 2;
+	const float CenteredShotIndex = ShotIndex == 0
+		? 0.0f
+		: static_cast<float>(OffsetStep)
+			* (ShotIndex % 2 == 1 ? -1.0f : 1.0f);
+	const FVector ShotTarget =
+		LockedTargetLocation
+		+ LateralDirection * CenteredShotIndex * AimedVolleyLateralSpacing;
+	const FVector Direction = (ShotTarget - SpawnLocation).GetSafeNormal();
 
-		FActorSpawnParameters SpawnParameters;
-		SpawnParameters.Owner = GetOwner();
-		SpawnParameters.SpawnCollisionHandlingOverride =
-			ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		ABossFanProjectile* Projectile =
-			GetWorld()->SpawnActor<ABossFanProjectile>(
-				FanProjectileClass,
-				SpawnLocation,
-				Direction.Rotation(),
-				SpawnParameters);
-		if (Projectile)
-		{
-			Projectile->InitializeProjectile(
-				Direction,
-				FanProjectileSpeed,
-				FanProjectileDamage);
-		}
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.Owner = GetOwner();
+	SpawnParameters.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	ABossFanProjectile* Projectile =
+		GetWorld()->SpawnActor<ABossFanProjectile>(
+			FanProjectileClass,
+			SpawnLocation,
+			Direction.Rotation(),
+			SpawnParameters);
+	if (Projectile)
+	{
+		Projectile->InitializeProjectile(
+			Direction,
+			AimedVolleyProjectileSpeed,
+			AimedVolleyProjectileDamage);
 	}
 
 	UE_LOG(
 		LogRDCAPlayer,
 		Log,
-		TEXT("Boss fan attack spawned. Boss=%s Count=%d Spread=%.1f Speed=%.1f"),
+		TEXT("Boss aimed volley shot. Boss=%s Shot=%d/%d Target=%s Speed=%.1f"),
 		*GetNameSafe(GetOwner()),
-		ProjectileCount,
-		FanSpreadDegrees,
-		FanProjectileSpeed);
+		ShotIndex + 1,
+		FMath::Max(AimedVolleyProjectileCount, 1),
+		*ShotTarget.ToCompactString(),
+		AimedVolleyProjectileSpeed);
 }
 
 void UBossEncounterComponent::UpdateShockwave(const float NormalizedTime)
