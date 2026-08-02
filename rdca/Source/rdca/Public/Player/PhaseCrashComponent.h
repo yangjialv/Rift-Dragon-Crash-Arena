@@ -87,6 +87,38 @@ public:
 		return CrashState == EPhaseCrashState::Attached || bChargingFromAttachment;
 	}
 
+	UFUNCTION(BlueprintPure, Category = "Phase Crash")
+	bool IsGroundDashActive() const
+	{
+		return CrashState == EPhaseCrashState::Crashing
+			&& FMath::IsNearlyZero(ActiveArcHeight);
+	}
+
+	UFUNCTION(BlueprintPure, Category = "Phase Crash")
+	FVector GetActiveTravelDirection() const
+	{
+		return (CrashEnd - CrashStart).GetSafeNormal();
+	}
+
+	UFUNCTION(BlueprintPure, Category = "Phase Crash")
+	float GetActiveCrashProgress() const
+	{
+		return CrashDuration > UE_KINDA_SMALL_NUMBER
+			? FMath::Clamp(CrashElapsed / CrashDuration, 0.0f, 1.0f)
+			: 0.0f;
+	}
+
+	UFUNCTION(BlueprintPure, Category = "Phase Crash")
+	FVector GetAimDirection() const
+	{
+		return OwnerPawn
+			? (AimTarget - OwnerPawn->GetActorLocation()).GetSafeNormal()
+			: FVector::ForwardVector;
+	}
+
+	UFUNCTION(BlueprintPure, Category = "Phase Crash")
+	FVector GetAttachedSurfaceNormal() const;
+
 	UFUNCTION(BlueprintCallable, Category = "Phase Crash")
 	void MoveAttached(const FVector2D& MovementInput);
 

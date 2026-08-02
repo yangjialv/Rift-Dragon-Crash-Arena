@@ -131,7 +131,11 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Timing",
 		meta = (ClampMin = "0.1"))
-	float ShockwaveAttackDuration = 1.6f;
+	float ShockwaveExpansionDuration = 2.4f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Facing",
+		meta = (ClampMin = "1.0", ClampMax = "720.0"))
+	float BossFacingRotationSpeed = 180.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Timing",
 		meta = (ClampMin = "0.0"))
@@ -167,15 +171,15 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Aimed Volley",
 		meta = (ClampMin = "1", ClampMax = "9"))
-	int32 AimedVolleyProjectileCount = 3;
+	int32 PrecisionVolleyProjectileCount = 5;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Aimed Volley",
 		meta = (ClampMin = "0.01"))
-	float AimedVolleyShotInterval = 0.2f;
+	float PrecisionVolleyShotInterval = 0.16f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Aimed Volley",
 		meta = (ClampMin = "0.0"))
-	float AimedVolleyLateralSpacing = 100.0f;
+	float PrecisionVolleyLateralSpacing = 110.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Aimed Volley",
 		meta = (ClampMin = "1.0"))
@@ -198,19 +202,19 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Barrage",
 		meta = (ClampMin = "3", ClampMax = "31"))
-	int32 FanBarrageProjectileCount = 13;
+	int32 DenseFanProjectileCount = 21;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Barrage",
 		meta = (ClampMin = "1.0", ClampMax = "170.0"))
-	float FanBarrageArcDegrees = 90.0f;
+	float DenseFanArcDegrees = 100.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Barrage",
 		meta = (ClampMin = "0.01"))
-	float FanBarrageShotInterval = 0.05f;
+	float DenseFanShotInterval = 0.035f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Barrage",
 		meta = (ClampMin = "1.0"))
-	float FanBarrageProjectileSpeed = 1200.0f;
+	float DenseFanProjectileSpeed = 1250.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Barrage",
 		meta = (ClampMin = "1"))
@@ -230,15 +234,19 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Laser Attack",
 		meta = (ClampMin = "0.1"))
-	float LaserWarningDuration = 1.2f;
+	float LaserAimWarningDuration = 1.4f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Laser Attack",
+		meta = (ClampMin = "0.05", ClampMax = "1.0"))
+	float LaserAimLockDuration = 0.25f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Laser Attack",
 		meta = (ClampMin = "0.1"))
-	float LaserSweepDuration = 1.5f;
+	float LaserActiveSweepDuration = 0.75f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Laser Attack",
 		meta = (ClampMin = "1.0", ClampMax = "300.0"))
-	float LaserSweepDegrees = 120.0f;
+	float LaserActiveSweepDegrees = 80.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Laser Attack",
 		meta = (ClampMin = "1"))
@@ -249,7 +257,7 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Shockwave",
 		meta = (ClampMin = "1.0"))
-	float ShockwaveMaximumRadius = 1200.0f;
+	float ShockwaveExpandedMaximumRadius = 3600.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Shockwave",
 		meta = (ClampMin = "0.0"))
@@ -300,6 +308,9 @@ private:
 	void SelectPhase2Combo();
 	void BeginPhase2SecondAttack();
 	void SpawnLaserWarning();
+	void UpdateBossFacing(float DeltaTime);
+	void UpdateLaserWarning();
+	void LockLaserSweep();
 	USceneComponent* FindNamedSceneComponent(FName ComponentName) const;
 	FVector GetProjectileOriginLocation() const;
 	FVector GetLaserOriginLocation() const;
@@ -313,6 +324,7 @@ private:
 	TWeakObjectPtr<USceneComponent> ShockwaveOrigin;
 	TWeakObjectPtr<USceneComponent> WeakPointOrigin;
 	FVector ShockwaveBaseScale = FVector::OneVector;
+	float ShockwaveBaseWorldRadius = 50.0f;
 	EBossEncounterState EncounterState = EBossEncounterState::Idle;
 	EBossCombatPhase CombatPhase = EBossCombatPhase::Phase1;
 	EBossAttackType CurrentAttack = EBossAttackType::None;
@@ -322,6 +334,9 @@ private:
 	FRandomStream AttackRandomStream;
 	int32 ActiveAttackRandomSeed = 0;
 	FVector LockedTargetLocation = FVector::ZeroVector;
+	FVector LaserWarningInitialPlayerLocation = FVector::ZeroVector;
+	float LaserWarningCurrentYaw = 0.0f;
+	bool bLaserAimLocked = false;
 	float StateElapsed = 0.0f;
 	float PreviousShockwaveRadius = 0.0f;
 	bool bPlayerDamagedThisAttack = false;

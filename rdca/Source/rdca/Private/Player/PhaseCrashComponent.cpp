@@ -426,6 +426,42 @@ float UPhaseCrashComponent::GetChargeAlpha() const
 		: 1.0f;
 }
 
+FVector UPhaseCrashComponent::GetAttachedSurfaceNormal() const
+{
+	if (bAttachCornerTransitionActive)
+	{
+		if (const UAttachSurfaceComponent* AttachBox =
+				Cast<UAttachSurfaceComponent>(AttachedSurfaceComponent.Get()))
+		{
+			const FVector StartNormal =
+				AttachBox->GetFaceNormalWorld(AttachCornerStartFace);
+			const FVector EndNormal =
+				AttachBox->GetFaceNormalWorld(AttachCornerEndFace);
+			const float LinearAlpha = FMath::Clamp(
+				AttachCornerTransitionElapsed
+					/ FMath::Max(AttachCornerTransitionDuration, 0.01f),
+				0.0f,
+				1.0f);
+			const float SmoothAlpha = FMath::SmoothStep(
+				0.0f,
+				1.0f,
+				LinearAlpha);
+			const FQuat QuarterTurn = FQuat::FindBetweenNormals(
+				StartNormal,
+				EndNormal);
+			return FQuat::Slerp(
+				FQuat::Identity,
+				QuarterTurn,
+				SmoothAlpha).RotateVector(StartNormal).GetSafeNormal();
+		}
+	}
+
+	return AttachedSurfaceComponent.IsValid()
+		? AttachedSurfaceComponent->GetComponentTransform()
+			.TransformVectorNoScale(AttachedSurfaceOutLocal).GetSafeNormal()
+		: FVector::UpVector;
+}
+
 float UPhaseCrashComponent::GetCooldownReadyPercent() const
 {
 	if (CrashState != EPhaseCrashState::Cooldown)
@@ -678,6 +714,36 @@ void UPhaseCrashComponent::ApplyGravity(const float DeltaTime)
 
 	if (Hit.IsValidBlockingHit() && VerticalVelocity < 0.0f)
 	{
+		AActor* HitActor = Hit.GetActor();
+		UCrashResponseComponent* ResponseComponent = HitActor
+			? HitActor->FindComponentByClass<UCrashResponseComponent>()
+			: nullptr;
+		if (ResponseComponent
+			&& ResponseComponent->GetResponse()
+				== ECrashCollisionResponse::Rebound)
+		{
+			ResponseComponent->NotifyCrashImpact(OwnerPawn, Hit);
+			ClearTemporaryMoveIgnores();
+			bActiveCrashFromAttachment = false;
+			bWeakPointDamageAppliedThisCrash = false;
+			VerticalVelocity = 0.0f;
+			SetCrashState(EPhaseCrashState::Crashing);
+			// Passive contact has no useful horizontal incoming vector. Treat the
+			// surface normal as the stored energy direction so irregular Boss
+			// hulls always eject the player outward instead of becoming ground.
+			HandleReboundImpact(
+				HitActor,
+				Hit,
+				-Hit.ImpactNormal.GetSafeNormal(),
+				*ResponseComponent);
+			UE_LOG(
+				LogRDCAPlayer,
+				Log,
+				TEXT("Passive rebound surface rejected player. Target=%s Normal=%s"),
+				*GetNameSafe(HitActor),
+				*Hit.ImpactNormal.ToCompactString());
+			return;
+		}
 		VerticalVelocity = 0.0f;
 	}
 }
@@ -1116,6 +1182,8 @@ void UPhaseCrashComponent::TickAttachCornerTransition(const float DeltaTime)
 	}
 	const FVector NextRight =
 		FVector::CrossProduct(EndNormal, NextUp).GetSafeNormal();
+	AttachedSurfaceOutLocal =
+		BoxTransform.InverseTransformVectorNoScale(EndNormal).GetSafeNormal();
 	AttachedSurfaceUpLocal =
 		BoxTransform.InverseTransformVectorNoScale(NextUp).GetSafeNormal();
 	AttachedSurfaceRightLocal =

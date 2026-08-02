@@ -27,6 +27,9 @@ public:
 		int32 NewDamage);
 
 	void ActivateLaser();
+	void UpdateWarningPose(const FVector& WorldLocation, float WorldYaw);
+	void ConfigureSweep(float NewStartYaw, float NewEndYaw);
+	float GetCurrentLaserYaw() const { return GetActorRotation().Yaw; }
 
 protected:
 	UFUNCTION()

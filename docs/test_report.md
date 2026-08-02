@@ -72,6 +72,27 @@ Run `tools/parse_combat_log.py` against the latest Unreal log to generate this r
 - [ ] HUD displays `FAN BARRAGE` during warning and active states.
 - [ ] Victory during or after a combo removes all remaining projectile and laser actors.
 
+## Manual Test: Boss Facing and Attack Pressure
+
+- [ ] Boss smoothly faces the player during Idle and attack preparation.
+- [ ] Boss stops free tracking during Recovery, WeakPointExposed, and Dead.
+- [ ] Laser warning follows the player before the final `0.25` second lock window.
+- [ ] After lock, reversing direction can evade the fixed 80-degree sweep.
+- [ ] Active laser never retargets the player's live position.
+- [ ] AimedVolley fires five center-out precision shots.
+- [ ] FanBarrage fires 21 projectiles in two interleaved angular waves.
+- [ ] AimedVolley and FanBarrage descend from `ProjectileOrigin` to the locked player height, then continue horizontally instead of passing down through the arena floor.
+- [ ] Shockwave expands to a maximum radius of 3600 units, with its visual edge and damage check remaining synchronized.
+- [ ] Every accepted player hit broadcasts `OnDamaged` and immediately starts the shared flash, camera-shake, and hit-sound feedback path.
+- [ ] A player material with a `HitFlash` scalar returns from 1 to 0 over approximately 0.12 seconds after damage.
+- [ ] Missing optional hit sound or camera-shake assets do not produce errors or block damage.
+- [ ] The slime keeps its last facing while idle and turns toward movement, dash, or crash travel instead of continuously facing the Boss.
+- [ ] Idle, moving, charging, dashing, airborne, and attached states produce distinct smooth squash-and-stretch silhouettes without changing collision size.
+- [ ] Attached presentation flattens against the current surface normal and follows face changes without rotating the camera root.
+- [ ] Shockwave reaches maximum radius in approximately `2.4` seconds.
+- [ ] Visible shockwave outer edge and damage timing coincide on a grounded player.
+- [ ] Player HP changes in the same frame as the shockwave hit log.
+
 ## Manual Test: Boss Art-Safe Origins
 
 - [ ] AimedVolley and FanBarrage spawn from `ProjectileOrigin`.

@@ -64,6 +64,32 @@ void APlayerCorePawn::BeginPlay()
 	Super::BeginPlay();
 
 	MovementComponent->MaxSpeed = MoveSpeed;
+	BaseVisualScale = VisualMesh
+		? VisualMesh->GetRelativeScale3D()
+		: FVector::OneVector;
+	BaseVisualLocation = VisualMesh
+		? VisualMesh->GetRelativeLocation()
+		: FVector::ZeroVector;
+	BaseVisualRotation = VisualMesh
+		? VisualMesh->GetRelativeRotation()
+		: FRotator::ZeroRotator;
+	if (VisualMesh)
+	{
+		FVector LocalBoundsMin;
+		FVector LocalBoundsMax;
+		VisualMesh->GetLocalBounds(LocalBoundsMin, LocalBoundsMax);
+		const FVector BoundsOrigin =
+			(LocalBoundsMin + LocalBoundsMax) * 0.5f * BaseVisualScale;
+		const FVector BoundsExtent =
+			(LocalBoundsMax - LocalBoundsMin) * 0.5f * BaseVisualScale.GetAbs();
+		const FVector BottomAxis = ModelBottomLocalAxis.GetSafeNormal();
+		BaseVisualBottomDistance = FMath::Max(
+			FVector::DotProduct(BoundsOrigin, BottomAxis)
+				+ FVector::DotProduct(BoundsExtent, BottomAxis.GetAbs()),
+			1.0f);
+	}
+	PreviousPresentationLocation = GetActorLocation();
+	LastFacingDirection = GetActorForwardVector();
 	FindBossCameraTarget();
 
 	const APlayerController* PlayerController = Cast<APlayerController>(GetController());
@@ -89,7 +115,311 @@ void APlayerCorePawn::BeginPlay()
 void APlayerCorePawn::Tick(const float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+	UpdateSlimePresentation(DeltaTime);
 	UpdateCombatCamera(DeltaTime);
+}
+
+void APlayerCorePawn::SetSlimeState(const EPlayerSlimeState NewState)
+{
+	if (SlimeState == NewState)
+	{
+		return;
+	}
+	const EPlayerSlimeState PreviousState = SlimeState;
+	SlimeState = NewState;
+	SlimeStateElapsed = 0.0f;
+	if (SlimeState == EPlayerSlimeState::Attached)
+	{
+		SurfaceImpactEnergy = 1.0f;
+		PreviousAttachedNormal = FVector::ZeroVector;
+	}
+	if (PreviousState == EPlayerSlimeState::Dashing
+		&& SlimeState != EPlayerSlimeState::Dashing)
+	{
+		DashReboundRemaining = DashReboundDuration;
+	}
+	OnSlimeStateChanged.Broadcast(PreviousState, SlimeState);
+}
+
+void APlayerCorePawn::UpdateSlimePresentation(const float DeltaTime)
+{
+	if (!VisualMesh || !PhaseCrashComponent)
+	{
+		return;
+	}
+
+	PresentationTime += DeltaTime;
+	SlimeStateElapsed += DeltaTime;
+	SurfaceImpactEnergy = FMath::Max(
+		SurfaceImpactEnergy - DeltaTime * 3.5f,
+		0.0f);
+	DashReboundRemaining = FMath::Max(
+		DashReboundRemaining - DeltaTime,
+		0.0f);
+	const FVector CurrentLocation = GetActorLocation();
+	FVector FrameVelocity = DeltaTime > UE_KINDA_SMALL_NUMBER
+		? (CurrentLocation - PreviousPresentationLocation) / DeltaTime
+		: FVector::ZeroVector;
+	PreviousPresentationLocation = CurrentLocation;
+
+	const EPhaseCrashState CrashState = PhaseCrashComponent->GetCrashState();
+	EPlayerSlimeState DesiredState = EPlayerSlimeState::Idle;
+	if (CrashState == EPhaseCrashState::Charging)
+	{
+		DesiredState = EPlayerSlimeState::Charging;
+	}
+	else if (PhaseCrashComponent->IsAttached())
+	{
+		DesiredState = EPlayerSlimeState::Attached;
+	}
+	else if (CrashState == EPhaseCrashState::Crashing)
+	{
+		DesiredState = PhaseCrashComponent->IsGroundDashActive()
+			? EPlayerSlimeState::Dashing
+			: EPlayerSlimeState::Airborne;
+	}
+	else if (FVector(FrameVelocity.X, FrameVelocity.Y, 0.0f).Size()
+		> MovementStateSpeedThreshold)
+	{
+		DesiredState = EPlayerSlimeState::Moving;
+	}
+	SetSlimeState(DesiredState);
+
+	FVector ShapeMultiplier = FVector::OneVector;
+	float PitchTilt = 0.0f;
+	float BackwardVisualOffset = 0.0f;
+	FVector DesiredUp = FVector::UpVector;
+	FVector DesiredFacing = LastFacingDirection;
+	FVector HorizontalVelocity(FrameVelocity.X, FrameVelocity.Y, 0.0f);
+	if (HorizontalVelocity.Normalize())
+	{
+		DesiredFacing = HorizontalVelocity;
+	}
+
+	switch (SlimeState)
+	{
+	case EPlayerSlimeState::Idle:
+	{
+		const float Pulse = FMath::Sin(PresentationTime * 3.0f) * 0.018f;
+		ShapeMultiplier = FVector(
+			1.16f + Pulse,
+			1.16f + Pulse,
+			0.72f - Pulse);
+		break;
+	}
+	case EPlayerSlimeState::Moving:
+		// The leading side is compressed while the liquid mass visually lags
+		// behind the collision body. Dash is the state that stretches forward.
+		ShapeMultiplier = FVector(0.84f, 1.10f, 0.78f);
+		BackwardVisualOffset = MovementTrailOffset;
+		PitchTilt = 6.0f;
+		break;
+	case EPlayerSlimeState::Charging:
+	{
+		const float Charge = PhaseCrashComponent->GetChargeAlpha();
+		DesiredFacing = PhaseCrashComponent->GetAimDirection();
+		ShapeMultiplier = FVector(
+			FMath::Lerp(0.90f, 0.68f, Charge),
+			FMath::Lerp(1.10f, 1.24f, Charge),
+			FMath::Lerp(0.76f, 0.58f, Charge));
+		BackwardVisualOffset = MaximumChargeRecoilOffset * Charge;
+		PitchTilt = FMath::Lerp(3.0f, 10.0f, Charge);
+		break;
+	}
+	case EPlayerSlimeState::Dashing:
+	{
+		DesiredFacing = PhaseCrashComponent->GetActiveTravelDirection();
+		const float Progress = PhaseCrashComponent->GetActiveCrashProgress();
+		const FVector StoredShape(0.68f, 1.26f, 0.68f);
+		const FVector ReleasedShape(1.88f, 0.68f, 0.72f);
+		const FVector ReboundShape(0.88f, 1.14f, 0.72f);
+		if (Progress < 0.10f)
+		{
+			const float ReleaseAlpha = FMath::SmoothStep(
+				0.0f,
+				1.0f,
+				Progress / 0.10f);
+			ShapeMultiplier = FMath::Lerp(
+				StoredShape,
+				ReleasedShape,
+				ReleaseAlpha);
+			BackwardVisualOffset = FMath::Lerp(
+				MaximumChargeRecoilOffset * 0.65f,
+				MovementTrailOffset * 1.25f,
+				ReleaseAlpha);
+		}
+		else if (Progress < 0.86f)
+		{
+			ShapeMultiplier = ReleasedShape;
+			BackwardVisualOffset = MovementTrailOffset * 1.25f;
+		}
+		else
+		{
+			const float ReboundAlpha = FMath::SmoothStep(
+				0.0f,
+				1.0f,
+				(Progress - 0.86f) / 0.14f);
+			ShapeMultiplier = FMath::Lerp(
+				ReleasedShape,
+				ReboundShape,
+				ReboundAlpha);
+			BackwardVisualOffset = FMath::Lerp(
+				MovementTrailOffset * 1.25f,
+				0.0f,
+				ReboundAlpha);
+		}
+		break;
+	}
+	case EPlayerSlimeState::Airborne:
+	{
+		DesiredFacing = PhaseCrashComponent->GetActiveTravelDirection();
+		const float Progress = PhaseCrashComponent->GetActiveCrashProgress();
+		if (Progress < 0.16f)
+		{
+			const float ReleaseAlpha = FMath::SmoothStep(
+				0.0f,
+				1.0f,
+				Progress / 0.16f);
+			ShapeMultiplier = FMath::Lerp(
+				FVector(0.74f, 1.18f, 0.66f),
+				FVector(1.34f, 0.86f, 0.94f),
+				ReleaseAlpha);
+		}
+		else
+		{
+			const float FallStretch = FMath::Clamp(
+				(Progress - 0.55f) / 0.45f,
+				0.0f,
+				1.0f);
+			ShapeMultiplier = FMath::Lerp(
+				FVector(1.12f, 0.92f, 1.02f),
+				FVector(1.30f, 0.84f, 0.90f),
+				FallStretch);
+		}
+		PitchTilt = DesiredFacing.Z * 18.0f;
+		break;
+	}
+	case EPlayerSlimeState::Attached:
+	{
+		DesiredUp = PhaseCrashComponent->GetAttachedSurfaceNormal();
+		if (!PreviousAttachedNormal.IsNearlyZero()
+			&& FVector::DotProduct(PreviousAttachedNormal, DesiredUp) < 0.96f)
+		{
+			// A face transition is a new directional contact. Re-spread the
+			// liquid against the new plane, but less violently than first impact.
+			SurfaceImpactEnergy = FMath::Max(SurfaceImpactEnergy, 0.65f);
+		}
+		PreviousAttachedNormal = DesiredUp;
+		FVector SurfaceVelocity = FVector::VectorPlaneProject(
+			FrameVelocity,
+			DesiredUp);
+		const float SurfaceSpeed = SurfaceVelocity.Size();
+		if (SurfaceVelocity.Normalize())
+		{
+			DesiredFacing = SurfaceVelocity;
+		}
+		const float MoveAlpha = FMath::Clamp(
+			SurfaceSpeed / FMath::Max(MoveSpeed, 1.0f),
+			0.0f,
+			1.0f);
+		const float SuctionPulse =
+			FMath::Sin(SlimeStateElapsed * 5.0f) * 0.015f;
+		ShapeMultiplier = FVector(
+			FMath::Lerp(1.18f, 0.88f, MoveAlpha)
+				+ SurfaceImpactEnergy * 0.22f + SuctionPulse,
+			1.18f + SurfaceImpactEnergy * 0.22f + SuctionPulse,
+			0.70f - SurfaceImpactEnergy * 0.18f - SuctionPulse);
+		BackwardVisualOffset = MovementTrailOffset * MoveAlpha;
+		break;
+	}
+	}
+
+	if (SlimeState != EPlayerSlimeState::Dashing
+		&& DashReboundRemaining > 0.0f)
+	{
+		const float ReboundAlpha = DashReboundDuration > UE_KINDA_SMALL_NUMBER
+			? DashReboundRemaining / DashReboundDuration
+			: 0.0f;
+		const float ReboundWave =
+			FMath::Sin((1.0f - ReboundAlpha) * PI) * ReboundAlpha;
+		ShapeMultiplier.X *= 1.0f - ReboundWave * 0.18f;
+		ShapeMultiplier.Y *= 1.0f + ReboundWave * 0.16f;
+		ShapeMultiplier.Z *= 1.0f - ReboundWave * 0.12f;
+	}
+
+	if (DesiredFacing.IsNearlyZero())
+	{
+		DesiredFacing = LastFacingDirection;
+	}
+	DesiredFacing = FVector::VectorPlaneProject(DesiredFacing, DesiredUp).GetSafeNormal();
+	if (DesiredFacing.IsNearlyZero())
+	{
+		DesiredFacing = FVector::VectorPlaneProject(LastFacingDirection, DesiredUp)
+			.GetSafeNormal();
+	}
+	if (!DesiredFacing.IsNearlyZero())
+	{
+		LastFacingDirection = DesiredFacing;
+	}
+
+	const FVector DesiredScale = BaseVisualScale * ShapeMultiplier;
+	const float ActiveTransformInterpSpeed =
+		SlimeState == EPlayerSlimeState::Dashing
+			? DashTransformInterpSpeed
+			: SlimeTransformInterpSpeed;
+	VisualMesh->SetRelativeScale3D(FMath::VInterpTo(
+		VisualMesh->GetRelativeScale3D(),
+		DesiredScale,
+		DeltaTime,
+		ActiveTransformInterpSpeed));
+
+	const FVector DesiredWorldLocation =
+		CollisionComponent->GetComponentTransform().TransformPosition(BaseVisualLocation)
+		- LastFacingDirection * BackwardVisualOffset
+		- DesiredUp * (SlimeState == EPlayerSlimeState::Attached
+			? BaseVisualBottomDistance * (1.0f - ShapeMultiplier.Z)
+			: 0.0f);
+	VisualMesh->SetWorldLocation(FMath::VInterpTo(
+		VisualMesh->GetComponentLocation(),
+		DesiredWorldLocation,
+		DeltaTime,
+		ActiveTransformInterpSpeed));
+
+	FRotator PresentationRotation = FRotationMatrix::MakeFromXZ(
+		LastFacingDirection,
+		DesiredUp).Rotator();
+	PresentationRotation.Yaw += VisualForwardYawOffset;
+	PresentationRotation.Pitch += PitchTilt;
+	if (SlimeState == EPlayerSlimeState::Idle)
+	{
+		PresentationRotation.Roll +=
+			FMath::Sin(PresentationTime * 2.2f) * IdleWobbleAmount;
+	}
+	FVector EffectiveModelUp = BaseVisualRotation.RotateVector(
+		-ModelBottomLocalAxis.GetSafeNormal());
+	FVector EffectiveModelForward = BaseVisualRotation.RotateVector(
+		ModelForwardLocalAxis.GetSafeNormal());
+	EffectiveModelForward = FVector::VectorPlaneProject(
+		EffectiveModelForward,
+		EffectiveModelUp).GetSafeNormal();
+	if (EffectiveModelUp.IsNearlyZero())
+	{
+		EffectiveModelUp = FVector::UpVector;
+	}
+	if (EffectiveModelForward.IsNearlyZero())
+	{
+		EffectiveModelForward = FVector::ForwardVector;
+	}
+	const FQuat ModelBasis = FRotationMatrix::MakeFromXZ(
+		EffectiveModelForward,
+		EffectiveModelUp).ToQuat();
+	const FRotator DesiredRotation =
+		(PresentationRotation.Quaternion() * ModelBasis.Inverse()).Rotator();
+	VisualMesh->SetWorldRotation(FMath::RInterpTo(
+		VisualMesh->GetComponentRotation(),
+		DesiredRotation,
+		DeltaTime,
+		SlimeFacingInterpSpeed));
 }
 
 void APlayerCorePawn::FindBossCameraTarget()

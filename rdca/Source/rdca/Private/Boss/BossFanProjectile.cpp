@@ -41,9 +41,23 @@ void ABossFanProjectile::Tick(const float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	FVector Movement = TravelDirection * TravelSpeed * DeltaTime;
+	if (bGroundSkimming)
+	{
+		const float CurrentHeight = GetActorLocation().Z;
+		if (CurrentHeight <= GroundSkimHeight
+			|| CurrentHeight + Movement.Z <= GroundSkimHeight)
+		{
+			Movement = GroundTravelDirection * TravelSpeed * DeltaTime;
+			Movement.Z = GroundSkimHeight - CurrentHeight;
+			TravelDirection = GroundTravelDirection;
+			SetActorRotation(TravelDirection.Rotation());
+		}
+	}
+
 	FHitResult Hit;
 	RootComponent->MoveComponent(
-		TravelDirection * TravelSpeed * DeltaTime,
+		Movement,
 		GetActorRotation(),
 		true,
 		&Hit);
@@ -51,6 +65,23 @@ void ABossFanProjectile::Tick(const float DeltaTime)
 	{
 		Destroy();
 	}
+}
+
+void ABossFanProjectile::InitializeGroundSkimmingProjectile(
+	const FVector& WorldDirection,
+	const float NewSpeed,
+	const int32 NewDamage,
+	const float WorldCruiseHeight)
+{
+	InitializeProjectile(WorldDirection, NewSpeed, NewDamage);
+	GroundTravelDirection = FVector(TravelDirection.X, TravelDirection.Y, 0.0f)
+		.GetSafeNormal();
+	if (GroundTravelDirection.IsNearlyZero())
+	{
+		GroundTravelDirection = FVector::ForwardVector;
+	}
+	GroundSkimHeight = WorldCruiseHeight;
+	bGroundSkimming = TravelDirection.Z < 0.0f;
 }
 
 void ABossFanProjectile::InitializeProjectile(

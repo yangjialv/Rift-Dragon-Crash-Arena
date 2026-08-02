@@ -97,6 +97,31 @@ void ABossSweepLaser::ActivateLaser()
 	}
 }
 
+void ABossSweepLaser::UpdateWarningPose(
+	const FVector& WorldLocation,
+	const float WorldYaw)
+{
+	if (bLaserActive)
+	{
+		return;
+	}
+	SetActorLocation(WorldLocation);
+	SetActorRotation(FRotator(0.0f, WorldYaw, 0.0f));
+}
+
+void ABossSweepLaser::ConfigureSweep(
+	const float NewStartYaw,
+	const float NewEndYaw)
+{
+	if (bLaserActive)
+	{
+		return;
+	}
+	StartYaw = NewStartYaw;
+	EndYaw = NewEndYaw;
+	SetActorRotation(FRotator(0.0f, StartYaw, 0.0f));
+}
+
 void ABossSweepLaser::Tick(const float DeltaTime)
 {
 	Super::Tick(DeltaTime);

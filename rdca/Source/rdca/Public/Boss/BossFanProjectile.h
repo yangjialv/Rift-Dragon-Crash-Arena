@@ -22,6 +22,12 @@ public:
 		float NewSpeed,
 		int32 NewDamage);
 
+	void InitializeGroundSkimmingProjectile(
+		const FVector& WorldDirection,
+		float NewSpeed,
+		int32 NewDamage,
+		float WorldCruiseHeight);
+
 protected:
 	UFUNCTION()
 	void HandleProjectileOverlap(
@@ -48,6 +54,9 @@ protected:
 
 private:
 	FVector TravelDirection = FVector::ForwardVector;
+	FVector GroundTravelDirection = FVector::ForwardVector;
+	float GroundSkimHeight = 0.0f;
+	bool bGroundSkimming = false;
 	float TravelSpeed = 900.0f;
 	int32 Damage = 1;
 	bool bHasAppliedDamage = false;
