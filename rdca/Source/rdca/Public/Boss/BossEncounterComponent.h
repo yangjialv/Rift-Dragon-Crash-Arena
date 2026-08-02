@@ -28,6 +28,7 @@ enum class EBossAttackType : uint8
 	None,
 	Shockwave,
 	AimedVolley,
+	FanBarrage,
 	SweepLaser
 };
 
@@ -186,6 +187,46 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Aimed Volley")
 	TSubclassOf<ABossFanProjectile> FanProjectileClass;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Barrage",
+		meta = (ClampMin = "0.1"))
+	float FanBarrageWarningDuration = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Barrage",
+		meta = (ClampMin = "0.1"))
+	float FanBarrageAttackDuration = 0.75f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Barrage",
+		meta = (ClampMin = "3", ClampMax = "31"))
+	int32 FanBarrageProjectileCount = 13;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Barrage",
+		meta = (ClampMin = "1.0", ClampMax = "170.0"))
+	float FanBarrageArcDegrees = 90.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Barrage",
+		meta = (ClampMin = "0.01"))
+	float FanBarrageShotInterval = 0.05f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Barrage",
+		meta = (ClampMin = "1.0"))
+	float FanBarrageProjectileSpeed = 1200.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Barrage",
+		meta = (ClampMin = "1"))
+	int32 FanBarrageProjectileDamage = 1;
+
+	/** Optional visual variant. Falls back to FanProjectileClass when unset. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Barrage")
+	TSubclassOf<ABossFanProjectile> FanBarrageProjectileClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Phase 2",
+		meta = (ClampMin = "0.1"))
+	float Phase2InterAttackDelay = 0.65f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Phase 2",
+		meta = (ClampMin = "0.1"))
+	float Phase2WeakPointExposedDuration = 2.25f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Laser Attack",
 		meta = (ClampMin = "0.1"))
 	float LaserWarningDuration = 1.2f;
@@ -253,6 +294,10 @@ private:
 	float GetCurrentStateDuration() const;
 	void TickAimedVolley(float DeltaTime);
 	void SpawnAimedVolleyProjectile(int32 ShotIndex);
+	void TickFanBarrage(float DeltaTime);
+	void SpawnFanBarrageProjectile(int32 ShotIndex);
+	void SelectPhase2Combo();
+	void BeginPhase2SecondAttack();
 	void SpawnLaserWarning();
 
 	TWeakObjectPtr<UStaticMeshComponent> ShockwaveVisual;
@@ -260,6 +305,7 @@ private:
 	TWeakObjectPtr<UBossWeakPointComponent> WeakPoint;
 	FVector ShockwaveBaseScale = FVector::OneVector;
 	EBossEncounterState EncounterState = EBossEncounterState::Idle;
+	EBossCombatPhase CombatPhase = EBossCombatPhase::Phase1;
 	EBossAttackType CurrentAttack = EBossAttackType::None;
 	EBossAttackType PreviousAttack = EBossAttackType::None;
 	EPlayerSpatialState LastObservedPlayerState =
@@ -274,5 +320,12 @@ private:
 	int32 CompletedAttacksSinceExposure = 0;
 	int32 AimedVolleyShotsFired = 0;
 	float AimedVolleyShotElapsed = 0.0f;
+	int32 FanBarrageShotsFired = 0;
+	float FanBarrageShotElapsed = 0.0f;
+	bool bPhase2ComboActive = false;
+	bool bPhase2AnchorPressureCombo = false;
+	bool bHasSelectedPhase2Combo = false;
+	bool bPreviousPhase2AnchorPressureCombo = false;
+	int32 Phase2ComboStep = 0;
 	TWeakObjectPtr<ABossSweepLaser> ActiveSweepLaser;
 };

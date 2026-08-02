@@ -188,6 +188,11 @@ void UPhaseCrashComponent::ReleaseCrash()
 
 	bActiveCrashFromAttachment = bChargingFromAttachment;
 	bWeakPointDamageAppliedThisCrash = false;
+	TWeakObjectPtr<AActor> DepartureAnchor;
+	if (bChargingFromAttachment)
+	{
+		DepartureAnchor = AttachedActor;
+	}
 	DetachFromCrashTarget();
 	bChargingFromAttachment = false;
 	ClearTemporaryMoveIgnores();
@@ -195,6 +200,14 @@ void UPhaseCrashComponent::ReleaseCrash()
 	VerticalVelocity = 0.0f;
 	ActiveCooldownDuration = CooldownDuration;
 	SetCrashState(EPhaseCrashState::Crashing);
+	if (DepartureAnchor.IsValid())
+	{
+		if (UAnchorOverloadComponent* Overload =
+				DepartureAnchor->FindComponentByClass<UAnchorOverloadComponent>())
+		{
+			Overload->ShatterAfterPlayerDeparture();
+		}
+	}
 	UE_LOG(
 		LogRDCAPlayer,
 		Log,
@@ -234,6 +247,13 @@ void UPhaseCrashComponent::StartGroundDash()
 		return;
 	}
 	DashInputBufferRemaining = 0.0f;
+	const bool bDashingFromAttachment =
+		CrashState == EPhaseCrashState::Attached && AttachedActor.IsValid();
+	TWeakObjectPtr<AActor> DepartureAnchor;
+	if (bDashingFromAttachment)
+	{
+		DepartureAnchor = AttachedActor;
+	}
 
 	if (!UpdateAimTarget())
 	{
@@ -269,6 +289,14 @@ void UPhaseCrashComponent::StartGroundDash()
 	VerticalVelocity = 0.0f;
 
 	SetCrashState(EPhaseCrashState::Crashing);
+	if (DepartureAnchor.IsValid())
+	{
+		if (UAnchorOverloadComponent* Overload =
+				DepartureAnchor->FindComponentByClass<UAnchorOverloadComponent>())
+		{
+			Overload->ShatterAfterPlayerDeparture();
+		}
+	}
 	UE_LOG(
 		LogRDCAPlayer,
 		Log,

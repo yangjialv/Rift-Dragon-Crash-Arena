@@ -21,6 +21,8 @@ FText GetBossAttackText(const EBossAttackType Attack)
 		return FText::FromString(TEXT("SHOCKWAVE"));
 	case EBossAttackType::AimedVolley:
 		return FText::FromString(TEXT("AIMED VOLLEY"));
+	case EBossAttackType::FanBarrage:
+		return FText::FromString(TEXT("FAN BARRAGE"));
 	case EBossAttackType::SweepLaser:
 		return FText::FromString(TEXT("LASER SWEEP"));
 	default:

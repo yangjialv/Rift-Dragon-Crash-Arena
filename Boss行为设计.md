@@ -163,6 +163,9 @@ SweepLaser
 FanBarrage 与 AimedVolley 复用同一个 Projectile Actor，但使用不同的
 发射调度、数量、角度和视觉颜色。
 
+首轮实现参数为 13 发、90 度、每发间隔 0.05 秒、速度 1200。
+组合在开始时只锁定一次玩家位置，第二段不会重新瞬时瞄准。
+
 ### 5.4 SweepLaser
 
 - 目标：切割一条空间路线；
@@ -225,6 +228,9 @@ FanBarrage 前摇
 
 玩家需要提前离开危险 Anchor，并从新位置组织反击。
 
+玩家从 Anchor 成功跳跃或冲刺后，该 Anchor 会自动碎裂并异地补位，
+因此 Anchor Pressure 同时要求玩家规划下一处落点，不能反复使用同一安全点。
+
 组合规则：
 
 1. 两段攻击之间必须至少保留一次明确输入机会；
@@ -232,6 +238,10 @@ FanBarrage 前摇
 3. 组合结束后必定暴露弱点；
 4. 不允许 Shockwave 与覆盖整个 Anchor 高度的激光同时生效；
 5. Phase 2 的压力来自选择叠加，不依赖不可读的速度提升。
+
+首轮实现使用 0.65 秒段间间隔；Grounded 优先选择 Ground Pressure，
+Attached 优先选择 Anchor Pressure，Airborne 使用可复现随机选择。第一轮之后
+两种组合交替出现，保证完整战斗能够覆盖两套 Phase 2 机制。
 
 ---
 

@@ -129,7 +129,7 @@ void UAnchorOverloadComponent::AddOverloadAmount(
 
 	if (CurrentOverloadAlpha >= 1.0f)
 	{
-		TriggerOverload();
+		TriggerOverload(true);
 	}
 	else
 	{
@@ -173,13 +173,25 @@ void UAnchorOverloadComponent::SetOverloadState(
 		static_cast<int32>(NewState));
 }
 
-void UAnchorOverloadComponent::TriggerOverload()
+void UAnchorOverloadComponent::ShatterAfterPlayerDeparture()
+{
+	if (OverloadState == EAnchorOverloadState::Recovering)
+	{
+		return;
+	}
+
+	AttachedPlayer.Reset();
+	TriggerOverload(false);
+}
+
+void UAnchorOverloadComponent::TriggerOverload(
+	const bool bDamageAttachedPlayer)
 {
 	APawn* PlayerPawn = AttachedPlayer.Get();
 	SetOverloadState(EAnchorOverloadState::Recovering);
 	SetAnchorAvailable(false);
 
-	if (PlayerPawn)
+	if (bDamageAttachedPlayer && PlayerPawn)
 	{
 		if (UPlayerHealthComponent* Health =
 				PlayerPawn->FindComponentByClass<UPlayerHealthComponent>())
@@ -219,10 +231,11 @@ void UAnchorOverloadComponent::TriggerOverload()
 	UE_LOG(
 		LogRDCAPlayer,
 		Log,
-		TEXT("Anchor overloaded. Anchor=%s Player=%s Damage=%d"),
+		TEXT("Anchor shattered. Anchor=%s Reason=%s Player=%s Damage=%d"),
 		*GetNameSafe(GetOwner()),
+		bDamageAttachedPlayer ? TEXT("Overload") : TEXT("PlayerDeparture"),
 		*GetNameSafe(PlayerPawn),
-		OverloadDamage);
+		bDamageAttachedPlayer ? OverloadDamage : 0);
 }
 
 void UAnchorOverloadComponent::FinishRecovery()

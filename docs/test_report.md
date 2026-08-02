@@ -14,6 +14,10 @@ Run `tools/parse_combat_log.py` against the latest Unreal log to generate this r
 - [ ] At `1.0`, an attached player takes damage and is force-detached.
 - [ ] A managed anchor fractures and respawns at a different free point.
 - [ ] Repeating the cycle does not reduce or duplicate the active anchor count.
+- [ ] Releasing a valid crash jump from an attached Anchor shatters that Anchor without damaging the player.
+- [ ] Starting a valid dash from an attached Anchor shatters that Anchor without damaging the player.
+- [ ] Cancelling aim or attempting an invalid launch does not shatter the Anchor.
+- [ ] A departure-shattered managed Anchor respawns at a different free point exactly once.
 
 ## Regression Test: Attack Detection
 
@@ -39,3 +43,17 @@ Run `tools/parse_combat_log.py` against the latest Unreal log to generate this r
 - [ ] A dash pressed shortly before availability executes once and is not repeated.
 - [ ] AimedVolley fires three faster projectiles toward the locked center/left/right targets.
 - [ ] Logs contain phase, player spatial state, weights, previous attack, selected attack, and seed.
+
+## Manual Test: Boss Phase 2 Combos
+
+- [ ] Reducing Boss HP to `1` enters Phase 2 only after the current weak-point window ends.
+- [ ] A grounded player selects Ground Pressure: Shockwave, input gap, then AimedVolley.
+- [ ] An attached player selects Anchor Pressure: FanBarrage, input gap, then SweepLaser.
+- [ ] After the first Phase 2 combo, both combos alternate even if the player stays grounded.
+- [ ] FanBarrage fires 13 projectiles across a dense 90-degree arc.
+- [ ] Both attacks in a combo use the target locked when the combo was selected.
+- [ ] The `0.65` second inter-attack gap leaves one clear movement-input opportunity.
+- [ ] Completing the second attack always exposes the weak point.
+- [ ] Phase 2 weak-point exposure lasts approximately `2.25` seconds.
+- [ ] HUD displays `FAN BARRAGE` during warning and active states.
+- [ ] Victory during or after a combo removes all remaining projectile and laser actors.

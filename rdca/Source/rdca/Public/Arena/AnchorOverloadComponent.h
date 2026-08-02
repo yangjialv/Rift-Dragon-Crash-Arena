@@ -59,6 +59,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Anchor|Overload")
 	void AddOverloadAmount(float NormalizedAmount);
 
+	/** Shatters the Anchor after a player deliberately launches from it.
+	 *  Unlike overload, this does not damage or force-detach the player. */
+	void ShatterAfterPlayerDeparture();
+
 	UPROPERTY(BlueprintAssignable, Category = "Anchor|Overload")
 	FOnAnchorOverloadStateChanged OnOverloadStateChanged;
 
@@ -90,7 +94,7 @@ protected:
 
 private:
 	void SetOverloadState(EAnchorOverloadState NewState);
-	void TriggerOverload();
+	void TriggerOverload(bool bDamageAttachedPlayer);
 	void FinishRecovery();
 	void SetAnchorAvailable(bool bAvailable);
 	void ApplyAnchorMaterial(UMaterialInterface* Material);
