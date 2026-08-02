@@ -1,11 +1,13 @@
 #include "Player/PlayerCorePawn.h"
 
+#include "Boss/BossEncounterComponent.h"
 #include "Camera/CameraComponent.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
+#include "EngineUtils.h"
 #include "GameFramework/FloatingPawnMovement.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/SpringArmComponent.h"
@@ -19,7 +21,7 @@
 
 APlayerCorePawn::APlayerCorePawn()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
 
 	CollisionComponent = CreateDefaultSubobject<USphereComponent>(TEXT("Collision"));
 	SetRootComponent(CollisionComponent);
@@ -62,6 +64,7 @@ void APlayerCorePawn::BeginPlay()
 	Super::BeginPlay();
 
 	MovementComponent->MaxSpeed = MoveSpeed;
+	FindBossCameraTarget();
 
 	const APlayerController* PlayerController = Cast<APlayerController>(GetController());
 	if (!PlayerController)
@@ -81,6 +84,112 @@ void APlayerCorePawn::BeginPlay()
 	{
 		UE_LOG(LogRDCAPlayer, Warning, TEXT("PlayerCorePawn: PlayerMappingContext is not assigned."));
 	}
+}
+
+void APlayerCorePawn::Tick(const float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+	UpdateCombatCamera(DeltaTime);
+}
+
+void APlayerCorePawn::FindBossCameraTarget()
+{
+	BossCameraTarget.Reset();
+	if (!GetWorld())
+	{
+		return;
+	}
+
+	for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+	{
+		AActor* Candidate = *It;
+		if (IsValid(Candidate)
+			&& Candidate->FindComponentByClass<UBossEncounterComponent>())
+		{
+			BossCameraTarget = Candidate;
+			return;
+		}
+	}
+}
+
+void APlayerCorePawn::UpdateCombatCamera(const float DeltaTime)
+{
+	if (!SpringArm)
+	{
+		return;
+	}
+	if (!BossCameraTarget.IsValid())
+	{
+		FindBossCameraTarget();
+	}
+
+	FVector DesiredTargetOffset(0.0f, 0.0f, CameraFocusHeight);
+	float DesiredArmLength = MinimumCameraArmLength;
+	if (BossCameraTarget.IsValid())
+	{
+		const FVector PlayerLocation = GetActorLocation();
+		const FVector BossLocation = BossCameraTarget->GetActorLocation();
+		const FVector PlayerToBoss = BossLocation - PlayerLocation;
+		FVector ToBoss = PlayerToBoss;
+		ToBoss.Z = 0.0f;
+		const float PlayerBossDistance = ToBoss.Size();
+		const float ZoomAlpha = FMath::Clamp(
+			PlayerBossDistance / FMath::Max(ArenaRadiusForMaximumZoom, 100.0f),
+			0.0f,
+			1.0f);
+		DesiredTargetOffset += PlayerToBoss * FMath::Clamp(
+			BossFramingWeight,
+			0.0f,
+			0.5f);
+		if (ToBoss.Normalize())
+		{
+			const FRotator DesiredRotation(
+				FMath::Lerp(
+					CombatCameraPitch,
+					MaximumDistanceCameraPitch,
+					ZoomAlpha),
+				ToBoss.Rotation().Yaw,
+				0.0f);
+			SpringArm->SetWorldRotation(FMath::RInterpTo(
+				SpringArm->GetComponentRotation(),
+				DesiredRotation,
+				DeltaTime,
+				CameraRotationInterpSpeed));
+		}
+
+		DesiredArmLength = FMath::Clamp(
+			MinimumCameraArmLength
+				+ PlayerBossDistance * CameraArmLengthPerBossDistance,
+			MinimumCameraArmLength,
+			FMath::Max(MaximumCameraArmLength, MinimumCameraArmLength));
+	}
+	else
+	{
+		const FRotator FallbackRotation(
+			CombatCameraPitch,
+			-45.0f,
+			0.0f);
+		SpringArm->SetWorldRotation(FMath::RInterpTo(
+			SpringArm->GetComponentRotation(),
+			FallbackRotation,
+			DeltaTime,
+			CameraRotationInterpSpeed));
+	}
+
+	const float FramingInterpSpeed =
+		DesiredArmLength > SpringArm->TargetArmLength
+			? FMath::Max(CameraFollowInterpSpeed * 2.0f, 8.0f)
+			: CameraFollowInterpSpeed;
+	SpringArm->TargetOffset = FMath::VInterpTo(
+		SpringArm->TargetOffset,
+		DesiredTargetOffset,
+		DeltaTime,
+		FramingInterpSpeed);
+	SpringArm->TargetArmLength = FMath::FInterpTo(
+		SpringArm->TargetArmLength,
+		DesiredArmLength,
+		DeltaTime,
+		FramingInterpSpeed);
 }
 
 void APlayerCorePawn::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -152,8 +261,18 @@ void APlayerCorePawn::Move(const FInputActionValue& Value)
 	const float InputScale = PhaseCrashComponent
 		? PhaseCrashComponent->GetMovementInputScale()
 		: 1.0f;
-	AddMovementInput(FVector::ForwardVector, MovementInput.Y * InputScale);
-	AddMovementInput(FVector::RightVector, MovementInput.X * InputScale);
+	FVector CameraForward = Camera
+		? Camera->GetForwardVector()
+		: FVector::ForwardVector;
+	FVector CameraRight = Camera
+		? Camera->GetRightVector()
+		: FVector::RightVector;
+	CameraForward.Z = 0.0f;
+	CameraRight.Z = 0.0f;
+	CameraForward.Normalize();
+	CameraRight.Normalize();
+	AddMovementInput(CameraForward, MovementInput.Y * InputScale);
+	AddMovementInput(CameraRight, MovementInput.X * InputScale);
 }
 
 void APlayerCorePawn::StartCrashCharge()

@@ -2,6 +2,20 @@
 
 Run `tools/parse_combat_log.py` against the latest Unreal log to generate this report.
 
+## Manual Test: Combat Camera
+
+- [ ] The camera remains outside the player and faces the center Boss while circling the arena.
+- [ ] Both player and Boss remain inside the frame at the maximum playable arena radius.
+- [ ] The Boss stays below the top safe margin instead of touching or crossing the screen edge.
+- [ ] Orbit yaw crosses every arena direction without a visible snap.
+- [ ] Moving toward the arena edge increases camera arm length without a sudden jump.
+- [ ] Moving toward the Boss smoothly returns to the closer framing.
+- [ ] The player remains visible around the full circular arena boundary.
+- [ ] Ground WASD follows screen up/down/left/right as the camera rotates.
+- [ ] Attached surface movement retains its existing local surface controls.
+- [ ] High-arc crashes and elevated Anchor attachment remain inside the frame.
+- [ ] Shockwave, AimedVolley, FanBarrage, and SweepLaser warnings remain readable at maximum zoom.
+
 ## Manual Test: Shared Anchor Overload
 
 - [ ] Player attachment increases `OverloadAlpha` continuously.
