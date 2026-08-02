@@ -3,6 +3,7 @@
 #include "Boss/BossWeakPointComponent.h"
 #include "Boss/BossFanProjectile.h"
 #include "Boss/BossSweepLaser.h"
+#include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "EngineUtils.h"
 #include "Engine/World.h"
@@ -80,6 +81,10 @@ void UBossEncounterComponent::BeginPlay()
 	Super::BeginPlay();
 
 	WeakPoint = GetOwner()->FindComponentByClass<UBossWeakPointComponent>();
+	ProjectileOrigin = FindNamedSceneComponent(TEXT("ProjectileOrigin"));
+	LaserOrigin = FindNamedSceneComponent(TEXT("LaserOrigin"));
+	ShockwaveOrigin = FindNamedSceneComponent(TEXT("ShockwaveOrigin"));
+	WeakPointOrigin = FindNamedSceneComponent(TEXT("WeakPointOrigin"));
 	TArray<UStaticMeshComponent*> MeshComponents;
 	GetOwner()->GetComponents<UStaticMeshComponent>(MeshComponents);
 	for (UStaticMeshComponent* Mesh : MeshComponents)
@@ -93,6 +98,24 @@ void UBossEncounterComponent::BeginPlay()
 		else if (Mesh->GetName().Equals(TEXT("WeakPoint"), ESearchCase::IgnoreCase))
 		{
 			WeakPointVisual = Mesh;
+		}
+	}
+	if (ShockwaveOrigin.IsValid() && ShockwaveVisual.IsValid())
+	{
+		ShockwaveVisual->SetWorldLocation(
+			ShockwaveOrigin->GetComponentLocation());
+	}
+	if (WeakPointOrigin.IsValid())
+	{
+		const FVector OriginLocation =
+			WeakPointOrigin->GetComponentLocation();
+		if (WeakPoint.IsValid())
+		{
+			WeakPoint->SetWorldLocation(OriginLocation);
+		}
+		if (WeakPointVisual.IsValid())
+		{
+			WeakPointVisual->SetWorldLocation(OriginLocation);
 		}
 	}
 
@@ -418,9 +441,7 @@ EPlayerSpatialState UBossEncounterComponent::ObservePlayerSpatialState() const
 		}
 	}
 
-	const float FloorZ = ShockwaveVisual.IsValid()
-		? ShockwaveVisual->GetComponentLocation().Z
-		: GetOwner()->GetActorLocation().Z;
+	const float FloorZ = GetShockwaveOriginLocation().Z;
 	return FMath::Abs(PlayerPawn->GetActorLocation().Z - FloorZ)
 			> GroundDamageMaximumHeight
 		? EPlayerSpatialState::Airborne
@@ -558,7 +579,7 @@ void UBossEncounterComponent::SpawnLaserWarning()
 		ActiveSweepLaser->Destroy();
 	}
 
-	const FVector SpawnLocation = GetOwner()->GetActorLocation();
+	const FVector SpawnLocation = GetLaserOriginLocation();
 	FVector ToPlayer = LockedTargetLocation - SpawnLocation;
 	ToPlayer.Z = 0.0f;
 	const float CenterYaw = ToPlayer.Rotation().Yaw;
@@ -610,8 +631,7 @@ void UBossEncounterComponent::SpawnAimedVolleyProjectile(
 		return;
 	}
 
-	const FVector SpawnLocation =
-		GetOwner()->GetActorLocation() + FVector(0.0f, 0.0f, 60.0f);
+	const FVector SpawnLocation = GetProjectileOriginLocation();
 	FVector ForwardToTarget = LockedTargetLocation - SpawnLocation;
 	if (!ForwardToTarget.Normalize())
 	{
@@ -764,8 +784,7 @@ void UBossEncounterComponent::SpawnFanBarrageProjectile(
 		return;
 	}
 
-	const FVector SpawnLocation =
-		GetOwner()->GetActorLocation() + FVector(0.0f, 0.0f, 60.0f);
+	const FVector SpawnLocation = GetProjectileOriginLocation();
 	const FVector CenterDirection =
 		(LockedTargetLocation - SpawnLocation).GetSafeNormal();
 	if (CenterDirection.IsNearlyZero())
@@ -842,11 +861,10 @@ void UBossEncounterComponent::TryDamagePlayer(
 		return;
 	}
 
-	const FVector FromBoss = PlayerPawn->GetActorLocation() - GetOwner()->GetActorLocation();
+	const FVector ShockwaveCenter = GetShockwaveOriginLocation();
+	const FVector FromBoss = PlayerPawn->GetActorLocation() - ShockwaveCenter;
 	const float HorizontalDistance = FVector(FromBoss.X, FromBoss.Y, 0.0f).Size();
-	const float ShockwaveFloorZ = ShockwaveVisual.IsValid()
-		? ShockwaveVisual->GetComponentLocation().Z
-		: GetOwner()->GetActorLocation().Z;
+	const float ShockwaveFloorZ = ShockwaveCenter.Z;
 	const float HeightAboveShockwave =
 		PlayerPawn->GetActorLocation().Z - ShockwaveFloorZ;
 	const bool bWaveReachedPlayer =
@@ -888,4 +906,54 @@ void UBossEncounterComponent::UpdateWeakPointVisual(const bool bExposed)
 	{
 		WeakPointVisual->SetMaterial(0, Material);
 	}
+}
+
+USceneComponent* UBossEncounterComponent::FindNamedSceneComponent(
+	const FName ComponentName) const
+{
+	if (!GetOwner())
+	{
+		return nullptr;
+	}
+
+	TArray<USceneComponent*> SceneComponents;
+	GetOwner()->GetComponents<USceneComponent>(SceneComponents);
+	for (USceneComponent* Component : SceneComponents)
+	{
+		if (Component
+			&& Component->GetFName().IsEqual(
+				ComponentName,
+				ENameCase::IgnoreCase))
+		{
+			return Component;
+		}
+	}
+	return nullptr;
+}
+
+FVector UBossEncounterComponent::GetProjectileOriginLocation() const
+{
+	return ProjectileOrigin.IsValid()
+		? ProjectileOrigin->GetComponentLocation()
+		: GetOwner()->GetActorLocation() + FVector(0.0f, 0.0f, 60.0f);
+}
+
+FVector UBossEncounterComponent::GetLaserOriginLocation() const
+{
+	return LaserOrigin.IsValid()
+		? LaserOrigin->GetComponentLocation()
+		: GetOwner()->GetActorLocation();
+}
+
+FVector UBossEncounterComponent::GetShockwaveOriginLocation() const
+{
+	if (ShockwaveOrigin.IsValid())
+	{
+		return ShockwaveOrigin->GetComponentLocation();
+	}
+	if (ShockwaveVisual.IsValid())
+	{
+		return ShockwaveVisual->GetComponentLocation();
+	}
+	return GetOwner()->GetActorLocation();
 }

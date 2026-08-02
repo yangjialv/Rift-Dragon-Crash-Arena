@@ -71,3 +71,12 @@ Run `tools/parse_combat_log.py` against the latest Unreal log to generate this r
 - [ ] Phase 2 weak-point exposure lasts approximately `2.25` seconds.
 - [ ] HUD displays `FAN BARRAGE` during warning and active states.
 - [ ] Victory during or after a combo removes all remaining projectile and laser actors.
+
+## Manual Test: Boss Art-Safe Origins
+
+- [ ] AimedVolley and FanBarrage spawn from `ProjectileOrigin`.
+- [ ] SweepLaser spawns from `LaserOrigin`, with visual and DamageVolume still aligned.
+- [ ] Shockwave visual and gameplay radius share `ShockwaveOrigin`.
+- [ ] Boss weak-point collision and visible mesh share `WeakPointOrigin`.
+- [ ] Moving an origin component changes only that system and requires no C++ edit.
+- [ ] Removing any optional origin falls back to the previous placeholder behavior.

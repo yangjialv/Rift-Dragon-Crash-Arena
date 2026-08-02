@@ -6,6 +6,7 @@
 
 class UBossWeakPointComponent;
 class UMaterialInterface;
+class USceneComponent;
 class UStaticMeshComponent;
 class ABossFanProjectile;
 class ABossSweepLaser;
@@ -299,10 +300,18 @@ private:
 	void SelectPhase2Combo();
 	void BeginPhase2SecondAttack();
 	void SpawnLaserWarning();
+	USceneComponent* FindNamedSceneComponent(FName ComponentName) const;
+	FVector GetProjectileOriginLocation() const;
+	FVector GetLaserOriginLocation() const;
+	FVector GetShockwaveOriginLocation() const;
 
 	TWeakObjectPtr<UStaticMeshComponent> ShockwaveVisual;
 	TWeakObjectPtr<UStaticMeshComponent> WeakPointVisual;
 	TWeakObjectPtr<UBossWeakPointComponent> WeakPoint;
+	TWeakObjectPtr<USceneComponent> ProjectileOrigin;
+	TWeakObjectPtr<USceneComponent> LaserOrigin;
+	TWeakObjectPtr<USceneComponent> ShockwaveOrigin;
+	TWeakObjectPtr<USceneComponent> WeakPointOrigin;
 	FVector ShockwaveBaseScale = FVector::OneVector;
 	EBossEncounterState EncounterState = EBossEncounterState::Idle;
 	EBossCombatPhase CombatPhase = EBossCombatPhase::Phase1;
