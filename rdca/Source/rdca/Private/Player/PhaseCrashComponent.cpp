@@ -1,7 +1,9 @@
 #include "Player/PhaseCrashComponent.h"
 
+#include "Arena/ArenaCombatBounds.h"
 #include "Arena/AttachSurfaceComponent.h"
 #include "Arena/AnchorOverloadComponent.h"
+#include "Boss/BossEncounterComponent.h"
 #include "Boss/BossWeakPointComponent.h"
 #include "Combat/CrashResponseComponent.h"
 #include "Components/PrimitiveComponent.h"
@@ -9,6 +11,7 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PawnMovementComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "EngineUtils.h"
 #include "rdca.h"
 
 namespace
@@ -32,6 +35,45 @@ const TCHAR* LexToString(const EPhaseCrashState State)
 	default:
 		return TEXT("Unknown");
 	}
+}
+
+bool IsDirectCrashAimTarget(const FHitResult& Hit)
+{
+	AActor* HitActor = Hit.GetActor();
+	return IsValid(HitActor)
+		&& (HitActor->FindComponentByClass<UCrashResponseComponent>()
+			|| HitActor->FindComponentByClass<UBossWeakPointComponent>());
+}
+
+bool IsBossCrashAimTarget(const FHitResult& Hit)
+{
+	AActor* HitActor = Hit.GetActor();
+	return (IsValid(HitActor)
+			&& (HitActor->FindComponentByClass<UBossEncounterComponent>()
+				|| HitActor->FindComponentByClass<UBossWeakPointComponent>()))
+		|| Cast<UBossWeakPointComponent>(Hit.GetComponent()) != nullptr;
+}
+
+void SetBossAimCursor(APlayerController& PlayerController, const bool bBossAim)
+{
+	if (bBossAim)
+	{
+		PlayerController.CurrentMouseCursor = EMouseCursor::Crosshairs;
+	}
+	else
+	{
+		PlayerController.CurrentMouseCursor = PlayerController.DefaultMouseCursor;
+	}
+}
+
+float GetArenaAimPlaneZ(const UWorld& World, const APawn& OwnerPawn)
+{
+	for (TActorIterator<AArenaCombatBounds> It(&World); It; ++It)
+	{
+		return It->GetArenaCenter().Z;
+	}
+	// Keeps older maps functional when they have not added Arena Combat Bounds.
+	return OwnerPawn.GetActorLocation().Z;
 }
 }
 
@@ -187,6 +229,7 @@ void UPhaseCrashComponent::ReleaseCrash()
 	}
 
 	bActiveCrashFromAttachment = bChargingFromAttachment;
+	bActiveBossCrash = bChargingFromAttachment && bAimingAtBoss;
 	bWeakPointDamageAppliedThisCrash = false;
 	TWeakObjectPtr<AActor> DepartureAnchor;
 	if (bChargingFromAttachment)
@@ -195,6 +238,12 @@ void UPhaseCrashComponent::ReleaseCrash()
 	}
 	DetachFromCrashTarget();
 	bChargingFromAttachment = false;
+	bAimingAtBoss = false;
+	if (APlayerController* PlayerController =
+			Cast<APlayerController>(OwnerPawn->GetController()))
+	{
+		SetBossAimCursor(*PlayerController, false);
+	}
 	ClearTemporaryMoveIgnores();
 	CrashElapsed = 0.0f;
 	VerticalVelocity = 0.0f;
@@ -211,8 +260,9 @@ void UPhaseCrashComponent::ReleaseCrash()
 	UE_LOG(
 		LogRDCAPlayer,
 		Log,
-		TEXT("Phase crash released. Arc=%s Distance=%.1f Height=%.1f Duration=%.2f"),
-		GetPredictedArcType() == ECrashArcType::HighArc ? TEXT("High") : TEXT("Low"),
+		TEXT("Phase crash released. Mode=%s Distance=%.1f Height=%.1f Duration=%.2f"),
+		bActiveBossCrash ? TEXT("BossDirect")
+			: (GetPredictedArcType() == ECrashArcType::HighArc ? TEXT("High") : TEXT("Low")),
 		FVector::Dist2D(CrashStart, CrashEnd),
 		ActiveArcHeight,
 		CrashDuration);
@@ -222,6 +272,12 @@ void UPhaseCrashComponent::CancelCharging()
 {
 	bCrashInputHeld = false;
 	bCrashInputBuffered = false;
+	bAimingAtBoss = false;
+	if (APlayerController* PlayerController =
+			Cast<APlayerController>(OwnerPawn ? OwnerPawn->GetController() : nullptr))
+	{
+		SetBossAimCursor(*PlayerController, false);
+	}
 	if (CrashState == EPhaseCrashState::Charging)
 	{
 		const bool bReturnToAttachment =
@@ -259,6 +315,12 @@ void UPhaseCrashComponent::StartGroundDash()
 	{
 		return;
 	}
+	bAimingAtBoss = false;
+	if (APlayerController* PlayerController =
+			Cast<APlayerController>(OwnerPawn->GetController()))
+	{
+		SetBossAimCursor(*PlayerController, false);
+	}
 	if (UPawnMovementComponent* Movement = OwnerPawn->GetMovementComponent())
 	{
 		Movement->StopMovementImmediately();
@@ -266,6 +328,7 @@ void UPhaseCrashComponent::StartGroundDash()
 
 	DetachFromCrashTarget();
 	bActiveCrashFromAttachment = false;
+	bActiveBossCrash = false;
 	bWeakPointDamageAppliedThisCrash = false;
 	ClearTemporaryMoveIgnores();
 	CrashStart = OwnerPawn->GetActorLocation();
@@ -323,6 +386,8 @@ void UPhaseCrashComponent::ForceArenaRecovery(
 	ClearTemporaryMoveIgnores();
 	bChargingFromAttachment = false;
 	bActiveCrashFromAttachment = false;
+	bActiveBossCrash = false;
+	bAimingAtBoss = false;
 	bWeakPointDamageAppliedThisCrash = false;
 	bCrashInputBuffered = false;
 	DashInputBufferRemaining = 0.0f;
@@ -555,6 +620,9 @@ bool UPhaseCrashComponent::UpdateAimTarget()
 		return false;
 	}
 
+	bAimingAtBoss = false;
+	SetBossAimCursor(*PlayerController, false);
+
 	FVector RayOrigin;
 	FVector RayDirection;
 	if (!PlayerController->DeprojectMousePositionToWorld(RayOrigin, RayDirection))
@@ -564,17 +632,29 @@ bool UPhaseCrashComponent::UpdateAimTarget()
 
 	const FVector RayEnd = RayOrigin + RayDirection * 100000.0f;
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(PhaseCrashAim), false, OwnerPawn);
-	FHitResult Hit;
 
-	if (GetWorld()->LineTraceSingleByChannel(
-		Hit,
+	TArray<FHitResult> Hits;
+	if (GetWorld()->LineTraceMultiByChannel(
+		Hits,
 		RayOrigin,
 		RayEnd,
 		ECC_Visibility,
 		QueryParams))
 	{
-		AimTarget = Hit.ImpactPoint;
-		return true;
+		for (const FHitResult& CandidateHit : Hits)
+		{
+			// Decorative environment collision must not pull the landing reticle
+			// off the cursor's ground projection. Combat and attachment targets
+			// remain directly aimable at their real hit point.
+			if (IsDirectCrashAimTarget(CandidateHit))
+			{
+				AimTarget = CandidateHit.ImpactPoint;
+				bAimingAtBoss = bChargingFromAttachment
+					&& IsBossCrashAimTarget(CandidateHit);
+				SetBossAimCursor(*PlayerController, bAimingAtBoss);
+				return true;
+			}
+		}
 	}
 
 	if (FMath::Abs(RayDirection.Z) <= UE_KINDA_SMALL_NUMBER)
@@ -582,7 +662,7 @@ bool UPhaseCrashComponent::UpdateAimTarget()
 		return false;
 	}
 
-	const float PlaneZ = OwnerPawn->GetActorLocation().Z;
+	const float PlaneZ = GetArenaAimPlaneZ(*GetWorld(), *OwnerPawn);
 	const float DistanceAlongRay = (PlaneZ - RayOrigin.Z) / RayDirection.Z;
 	if (DistanceAlongRay <= 0.0f)
 	{
@@ -606,6 +686,22 @@ bool UPhaseCrashComponent::CalculateTrajectory(
 	}
 
 	OutStart = OwnerPawn->GetActorLocation();
+	if (bChargingFromAttachment && bAimingAtBoss)
+	{
+		const float DirectDistance = FVector::Distance(OutStart, AimTarget);
+		if (DirectDistance <= UE_KINDA_SMALL_NUMBER)
+		{
+			return false;
+		}
+
+		OutEnd = AimTarget;
+		OutArcHeight = 0.0f;
+		OutDuration = FMath::Max(
+			DirectDistance / FMath::Max(BossCrashSpeed, 1.0f),
+			MinimumFlightDuration);
+		return true;
+	}
+
 	FVector HorizontalOffset = AimTarget - OutStart;
 	HorizontalOffset.Z = 0.0f;
 
@@ -664,11 +760,26 @@ void UPhaseCrashComponent::DrawTrajectoryPreview() const
 		PreviewArcHeight,
 		PreviewDuration))
 	{
+		// A press has already produced a valid cursor projection, even before
+		// enough drag distance exists to authorise a launch. Show that point
+		// immediately; only the trajectory remains absent until the player drags.
+		DrawDebugSphere(
+			GetWorld(),
+			AimTarget,
+			24.0f,
+			12,
+			FColor::Cyan,
+			false,
+			0.0f,
+			0,
+			2.0f);
 		return;
 	}
 
 	const FColor PreviewColor =
-		GetPredictedArcType() == ECrashArcType::HighArc
+		IsBossAimActive()
+			? FColor::Red
+			: GetPredictedArcType() == ECrashArcType::HighArc
 			? FColor::Yellow
 			: FColor::Green;
 	constexpr int32 SegmentCount = 20;
@@ -813,6 +924,7 @@ void UPhaseCrashComponent::TickCooldown(const float DeltaTime)
 void UPhaseCrashComponent::FinishCrash()
 {
 	ClearTemporaryMoveIgnores();
+	bActiveBossCrash = false;
 	CrashElapsed = 0.0f;
 	CrashDuration = 0.0f;
 	RecoveryRemaining = RecoveryDuration;
@@ -1054,6 +1166,7 @@ void UPhaseCrashComponent::HandleReboundImpact(
 	const FVector& IncomingDirection,
 	const UCrashResponseComponent& ResponseComponent)
 {
+	bActiveBossCrash = false;
 	FVector ReboundDirection = FMath::GetReflectionVector(
 		IncomingDirection,
 		Hit.ImpactNormal.GetSafeNormal());

@@ -1,11 +1,61 @@
 #include "Arena/ArenaPhaseController.h"
 
 #include "Boss/BossEncounterComponent.h"
+#include "Components/ActorComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "EngineUtils.h"
 #include "Kismet/KismetMaterialLibrary.h"
 #include "Materials/MaterialParameterCollection.h"
 #include "rdca.h"
+
+namespace
+{
+bool HasPhaseTag(const AActor& Actor, const FName Tag)
+{
+	if (Actor.ActorHasTag(Tag))
+	{
+		return true;
+	}
+
+	TInlineComponentArray<UActorComponent*> Components(&Actor);
+	for (const UActorComponent* Component : Components)
+	{
+		if (Component && Component->ComponentHasTag(Tag))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+FName FindPhaseMappingTag(const AActor& Actor, const FName Prefix)
+{
+	for (const FName Tag : Actor.Tags)
+	{
+		if (Tag.ToString().StartsWith(Prefix.ToString()))
+		{
+			return Tag;
+		}
+	}
+
+	TInlineComponentArray<UActorComponent*> Components(&Actor);
+	for (const UActorComponent* Component : Components)
+	{
+		if (!Component)
+		{
+			continue;
+		}
+		for (const FName Tag : Component->ComponentTags)
+		{
+			if (Tag.ToString().StartsWith(Prefix.ToString()))
+			{
+				return Tag;
+			}
+		}
+	}
+	return NAME_None;
+}
+}
 
 AArenaPhaseController::AArenaPhaseController()
 {
@@ -173,18 +223,9 @@ void AArenaPhaseController::CacheEnvironmentActors()
 			continue;
 		}
 
-		FName MappingTag = NAME_None;
-		for (const FName Tag : Actor->Tags)
-		{
-			if (Tag.ToString().StartsWith(PhaseMapTagPrefix.ToString()))
-			{
-				MappingTag = Tag;
-				break;
-			}
-		}
-
-		const bool bIsCyber = Actor->ActorHasTag(CyberVisualTag);
-		const bool bIsSource = Actor->ActorHasTag(SourceVisualTag);
+		const FName MappingTag = FindPhaseMappingTag(*Actor, PhaseMapTagPrefix);
+		const bool bIsCyber = HasPhaseTag(*Actor, CyberVisualTag);
+		const bool bIsSource = HasPhaseTag(*Actor, SourceVisualTag);
 		if ((!bIsCyber && !bIsSource) || (bIsCyber && bIsSource))
 		{
 			continue;
@@ -235,10 +276,10 @@ void AArenaPhaseController::InitializeCyberRift()
 		if (Pair.CyberActor.IsValid())
 		{
 			Pair.CyberActor->SetActorHiddenInGame(false);
-			if (IsRingPair(Pair))
-			{
-				SetActorCollision(Pair.CyberActor.Get(), true);
-			}
+			// Arena art is visual only. The dedicated Floor Disc and Combat Bounds
+			// own gameplay collision, so a phase swap must never revive collision
+			// on the high-triangle visual rings.
+			SetActorCollision(Pair.CyberActor.Get(), false);
 		}
 		if (Pair.SourceActor.IsValid())
 		{
@@ -251,6 +292,7 @@ void AArenaPhaseController::InitializeCyberRift()
 		if (Actor.IsValid())
 		{
 			Actor->SetActorHiddenInGame(false);
+			SetActorCollision(Actor.Get(), false);
 		}
 	}
 	for (const TWeakObjectPtr<AActor>& Actor : SourceOnlyActors)
@@ -289,20 +331,12 @@ void AArenaPhaseController::RevealPair(FPhaseActorPair& Pair)
 	if (Pair.SourceActor.IsValid())
 	{
 		Pair.SourceActor->SetActorHiddenInGame(false);
-	}
-	if (IsRingPair(Pair))
-	{
-		// Enable the new floor before disabling the old one: there is never a
-		// physics frame in which the player can fall through the arena.
-		SetActorCollision(Pair.SourceActor.Get(), true);
+		SetActorCollision(Pair.SourceActor.Get(), false);
 	}
 	if (Pair.CyberActor.IsValid())
 	{
 		Pair.CyberActor->SetActorHiddenInGame(true);
-		if (IsRingPair(Pair))
-		{
-			SetActorCollision(Pair.CyberActor.Get(), false);
-		}
+		SetActorCollision(Pair.CyberActor.Get(), false);
 	}
 	Pair.bRevealed = true;
 }

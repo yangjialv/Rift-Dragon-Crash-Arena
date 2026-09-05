@@ -5,11 +5,21 @@
 #include "Boss/BossWeakPointComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Pawn.h"
+#include "TimerManager.h"
 #include "rdca.h"
 
 UBossAnimationComponent::UBossAnimationComponent()
 {
-	PrimaryComponentTick.bCanEverTick = false;
+	PrimaryComponentTick.bCanEverTick = true;
+}
+
+void UBossAnimationComponent::TickComponent(
+	const float DeltaTime,
+	const ELevelTick TickType,
+	FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	TickStunLoop();
 }
 
 void UBossAnimationComponent::BeginPlay()
@@ -49,20 +59,20 @@ void UBossAnimationComponent::BeginPlay()
 		{
 			Encounter->SetIntroHold(true);
 		}
-		bIntroActive = PlayMontage(IntroMontage);
-		if (bIntroActive)
+		if (GroundIdleMontage && GroundIdleDuration > 0.0f
+			&& PlayMontage(GroundIdleMontage))
 		{
-			FOnMontageEnded EndDelegate;
-			EndDelegate.BindUObject(
+			bIntroActive = true;
+			GetWorld()->GetTimerManager().SetTimer(
+				GroundIdleTimer,
 				this,
-				&UBossAnimationComponent::HandleIntroMontageEnded);
-			BossMesh->GetAnimInstance()->Montage_SetEndDelegate(
-				EndDelegate,
-				IntroMontage);
+				&UBossAnimationComponent::StartIntroMontage,
+				GroundIdleDuration,
+				false);
 		}
 		else
 		{
-			FinishIntro();
+			StartIntroMontage();
 		}
 	}
 	else
@@ -78,6 +88,11 @@ void UBossAnimationComponent::HandleEncounterStateChanged(
 	if (bIntroActive || !Encounter.IsValid())
 	{
 		return;
+	}
+	if (PreviousState == EBossEncounterState::WeakPointExposed
+		&& NewState != EBossEncounterState::WeakPointExposed)
+	{
+		StopStunLoop();
 	}
 
 	const EBossAttackType Attack = Encounter->GetCurrentAttack();
@@ -156,6 +171,16 @@ void UBossAnimationComponent::HandleAnimationEvent(
 	}
 	else
 	{
+		if (AnimationEvent == EBossAnimationEvent::IntroTakeoff)
+		{
+			// StartIntroMontage already emits this event for the default opening.
+			// Keeping the Notify compatible avoids double-shattering the centre.
+			if (bIntroTakeoffBroadcast)
+			{
+				return;
+			}
+			bIntroTakeoffBroadcast = true;
+		}
 		OnAnimationEvent.Broadcast(AnimationEvent);
 	}
 
@@ -175,11 +200,79 @@ void UBossAnimationComponent::FinishIntro()
 	}
 	bIntroFinished = true;
 	bIntroActive = false;
+	if (GetWorld())
+	{
+		GetWorld()->GetTimerManager().ClearTimer(GroundIdleTimer);
+		GetWorld()->GetTimerManager().ClearTimer(IntroGroundHoldTimer);
+	}
 	if (Encounter.IsValid())
 	{
 		Encounter->SetIntroHold(false);
 	}
 	OnAnimationEvent.Broadcast(EBossAnimationEvent::IntroFinished);
+}
+
+void UBossAnimationComponent::StartIntroMontage()
+{
+	if (bIntroFinished || !BossMesh.IsValid() || !IntroMontage)
+	{
+		FinishIntro();
+		return;
+	}
+
+	UAnimInstance* AnimInstance = BossMesh->GetAnimInstance();
+	if (!AnimInstance)
+	{
+		FinishIntro();
+		return;
+	}
+
+	// Do not stop Ground Idle manually here. Montage_Play takes ownership of
+	// the shared slot and blends from its current pose into Intro. Explicitly
+	// stopping first briefly exposed the AnimBP's FlyIdle base pose, producing
+	// a visible pop between the grounded and takeoff animations.
+	bIntroActive = PlayMontage(IntroMontage);
+	if (!bIntroActive)
+	{
+		FinishIntro();
+		return;
+	}
+
+	if (IntroGroundHoldDuration > 0.0f)
+	{
+		AnimInstance->Montage_SetPlayRate(IntroMontage, 0.0f);
+		GetWorld()->GetTimerManager().SetTimer(
+			IntroGroundHoldTimer,
+			this,
+			&UBossAnimationComponent::ReleaseIntroGroundHold,
+			IntroGroundHoldDuration,
+			false);
+	}
+
+	FOnMontageEnded EndDelegate;
+	EndDelegate.BindUObject(this, &UBossAnimationComponent::HandleIntroMontageEnded);
+	AnimInstance->Montage_SetEndDelegate(EndDelegate, IntroMontage);
+
+	// Ground Idle has completed: the following Montage is the actual takeoff.
+	// Emit this once so the arena can fracture the centre without a hand-placed
+	// Notify; an existing IntroTakeoff Notify remains harmless and is ignored.
+	bIntroTakeoffBroadcast = true;
+	OnAnimationEvent.Broadcast(EBossAnimationEvent::IntroTakeoff);
+	UE_LOG(LogRDCAPlayer, Log, TEXT("Boss intro takeoff began. Boss=%s"),
+		*GetNameSafe(GetOwner()));
+}
+
+void UBossAnimationComponent::ReleaseIntroGroundHold()
+{
+	if (!bIntroActive || !BossMesh.IsValid() || !IntroMontage)
+	{
+		return;
+	}
+
+	if (UAnimInstance* AnimInstance = BossMesh->GetAnimInstance())
+	{
+		AnimInstance->Montage_SetPlayRate(IntroMontage, 1.0f);
+	}
 }
 
 void UBossAnimationComponent::HandleIntroMontageEnded(
@@ -231,6 +324,48 @@ void UBossAnimationComponent::JumpSpellToSection(const FName SectionName)
 		&& AnimInstance->Montage_IsPlaying(SpellMontage))
 	{
 		AnimInstance->Montage_JumpToSection(SectionName, SpellMontage);
+	}
+}
+
+void UBossAnimationComponent::TickStunLoop()
+{
+	if (!Encounter.IsValid()
+		|| Encounter->GetEncounterState() != EBossEncounterState::WeakPointExposed
+		|| !StunMontage)
+	{
+		return;
+	}
+
+	UAnimInstance* AnimInstance = BossMesh.IsValid()
+		? BossMesh->GetAnimInstance()
+		: nullptr;
+	if (!AnimInstance)
+	{
+		return;
+	}
+
+	if (!AnimInstance->Montage_IsActive(StunMontage))
+	{
+		// A successful weak-point hit may briefly interrupt Stun with Hit. Once
+		// that reaction has completed, restore the stunned pose for the rest of
+		// the exposure window rather than falling through to FlyIdle.
+		if (!AnimInstance->Montage_IsActive(nullptr))
+		{
+			PlayMontage(StunMontage);
+		}
+	}
+}
+
+void UBossAnimationComponent::StopStunLoop()
+{
+	if (UAnimInstance* AnimInstance = BossMesh.IsValid()
+		? BossMesh->GetAnimInstance()
+		: nullptr)
+	{
+		if (StunMontage && AnimInstance->Montage_IsActive(StunMontage))
+		{
+			AnimInstance->Montage_Stop(StunLoopReleaseBlendOut, StunMontage);
+		}
 	}
 }
 

@@ -51,6 +51,7 @@ Run `tools/parse_combat_log.py` against the latest Unreal log to generate this r
 - [ ] AimedVolley and Laser keep the target selected at the start of their warning.
 - [ ] Moving during the warning does not retarget the attack.
 - [ ] The weak point is exposed after two completed attacks, not after every attack.
+- [ ] The weak-point stun/exposure window lasts 6.0 seconds in Phase 1 and 4.5 seconds in Phase 2 with the default 2.0 multiplier.
 - [ ] Existing Shockwave, projectile, Laser visual, damage, and cleanup still work.
 - [ ] Holding crash during cooldown starts aiming on the first available frame.
 - [ ] Releasing crash before cooldown completes cancels the buffered request.
@@ -119,17 +120,23 @@ Run `tools/parse_combat_log.py` against the latest Unreal log to generate this r
 - [ ] Shockwave plays the Roar Montage.
 - [ ] SweepLaser enters Spell Start during warning, Loop during the active sweep, and End during recovery.
 - [ ] An effective weak-point crash plays Hit and exposure plays Stun.
+- [ ] Stun loops for the full weak-point exposure window; it never falls back to FlyIdle early.
 - [ ] Death interrupts active Montages, plays Death, and never returns to FlyIdle.
 - [ ] Missing optional Montages do not block the combat state machine.
-- [ ] IntroTakeoff fires once at the marked frame and triggers only the intro platform fracture.
+- [ ] A looping Ground Idle plays for three seconds before Intro starts.
+- [ ] IntroTakeoff fires once when Ground Idle transitions into Intro and triggers only the intro platform fracture.
+- [ ] When Ground Idle is unconfigured, Intro may instead use `Intro Ground Hold Duration` as a fallback.
+- [ ] The centre fracture is not pre-placed, inherits the Cyber centre material, and appears only at IntroTakeoff.
+- [ ] During Intro the player cannot move, aim, jump, or dash; `IntroFinished` releases input exactly once.
+- [ ] Intro completion spawns the configured nine-Anchor layout after the centre platform has fractured.
 
 ## Manual Test: Arena Phase Transition
 
 - [ ] `ArenaPhaseController` finds one complete Cyber/Source pair for `PhaseMap_RingFloor` and each pillar tag.
-- [ ] Phase 1 starts with only Cyber Rift actors visible; the Cyber ring has collision and the Source ring has none.
+- [ ] Phase 1 starts with only Cyber Rift actors visible; both visual ring meshes remain collision-free because Floor Disc owns gameplay collision.
 - [ ] When the Boss first enters Phase 2, combat pauses for `ExpansionDuration` and the expansion begins at `ArenaPhaseOrigin`.
 - [ ] Each `PhaseMap_PillarXX` pair switches only when the expansion radius reaches its placement distance.
-- [ ] At `RingRevealRadius`, the Source ring collision is enabled before Cyber ring collision is disabled; the player never falls.
+- [ ] The visual ring swap never changes collision; the player remains supported by the dedicated Floor Disc.
 - [ ] At the end, all Source Code Void actors are visible, all Cyber Rift actors are hidden, and combat resumes once.
 - [ ] With `bUseMaterialSphereMask` disabled, the object-level transition is correct and needs no material setup.
 - [ ] With a configured `MPC_ArenaPhase` and matching environment materials, the visible boundary is a sphere centred on `ArenaPhaseOrigin`.
@@ -142,6 +149,10 @@ Run `tools/parse_combat_log.py` against the latest Unreal log to generate this r
 - [ ] The invisible Floor Disc supports the arena without enabling collision on either high-triangle visual ring.
 - [ ] The visible Inner Boundary disc accurately marks the circular low air wall at the Boss centre.
 - [ ] Ground movement is blocked by the inner air wall, while a high crash can pass over it to reach the Boss.
+- [ ] While attached, aiming left-click at Boss body or weak point changes the cursor to a crosshair and previews a red straight line; releasing launches a fast direct Boss crash.
+- [ ] While attached, aiming anywhere other than the Boss retains the normal drag parabola and cursor.
 - [ ] Enabling `Use Arena Random Spawns` on Anchor Spawn Manager creates every Anchor between the configured inner and outer clearances.
 - [ ] Randomly generated Anchors preserve emergence, overload destruction, and delayed replacement behavior.
 - [ ] `Minimum Anchor Spacing` prevents two simultaneously active Anchors from occupying the same tactical position.
+- [ ] Across several runs, Anchor positions occupy different parts of the ring without forming a regular array; each later Anchor preferentially fills the largest gap between active Anchors.
+- [ ] When no active Anchor is within `Guaranteed Anchor Distance` of the player, the next replacement appears within that distance whenever a valid point exists.

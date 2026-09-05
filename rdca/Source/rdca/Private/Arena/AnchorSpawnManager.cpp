@@ -303,6 +303,50 @@ bool AAnchorSpawnManager::SpawnAnchorAtRandomLocation()
 		return false;
 	}
 
+	const bool bRequirePlayerReachability = bGuaranteeReachableAnchor
+		&& !HasReachableActiveAnchor();
+	FVector CandidateLocation;
+	if (!ChooseBalancedArenaAnchorLocation(
+			bRequirePlayerReachability,
+			CandidateLocation)
+		// A tight reachable radius must never stop the encounter. If no valid
+		// position exists within it, retain balanced arena coverage instead.
+		&& (!bRequirePlayerReachability
+			|| !ChooseBalancedArenaAnchorLocation(false, CandidateLocation)))
+	{
+		UE_LOG(
+			LogRDCAPlayer,
+			Warning,
+			TEXT("Anchor balanced arena spawn failed after %d candidates. Manager=%s"),
+			ArenaRandomAttempts,
+			*GetNameSafe(this));
+		return false;
+	}
+
+	CandidateLocation.Z += ArenaSpawnHeightOffset;
+	return SpawnAnchorAtTransform(
+		FTransform(GetActorQuat(), CandidateLocation),
+		nullptr);
+}
+
+bool AAnchorSpawnManager::ChooseBalancedArenaAnchorLocation(
+	const bool bRequirePlayerReachability,
+	FVector& OutLocation)
+{
+	AArenaCombatBounds* Bounds = ResolveArenaCombatBounds();
+	if (!Bounds)
+	{
+		return false;
+	}
+
+	const APawn* PlayerPawn = bRequirePlayerReachability
+		? UGameplayStatics::GetPlayerPawn(this, 0)
+		: nullptr;
+	const float ReachableDistanceSquared = FMath::Square(GuaranteedAnchorDistance);
+	const float Randomness = FMath::Clamp(CoverageRandomness, 0.0f, 0.5f);
+	float BestCoverageScore = -1.0f;
+	TArray<FVector> BestCandidates;
+
 	for (int32 Attempt = 0; Attempt < FMath::Max(ArenaRandomAttempts, 1); ++Attempt)
 	{
 		FVector CandidateLocation;
@@ -315,20 +359,35 @@ bool AAnchorSpawnManager::SpawnAnchorAtRandomLocation()
 		{
 			continue;
 		}
-		CandidateLocation.Z += ArenaSpawnHeightOffset;
 
-		return SpawnAnchorAtTransform(
-			FTransform(GetActorQuat(), CandidateLocation),
-			nullptr);
+		if (PlayerPawn
+			&& FVector::DistSquared2D(
+				CandidateLocation,
+				PlayerPawn->GetActorLocation()) > ReachableDistanceSquared)
+		{
+			continue;
+		}
+
+		const float CoverageScore = GetClosestAnchorDistanceSquared(CandidateLocation);
+		if (CoverageScore > BestCoverageScore)
+		{
+			BestCoverageScore = CoverageScore;
+			BestCandidates.Reset();
+			BestCandidates.Add(CandidateLocation);
+		}
+		else if (CoverageScore >= BestCoverageScore * (1.0f - Randomness))
+		{
+			BestCandidates.Add(CandidateLocation);
+		}
 	}
 
-	UE_LOG(
-		LogRDCAPlayer,
-		Warning,
-		TEXT("Anchor arena-random spawn failed after %d attempts. Manager=%s"),
-		ArenaRandomAttempts,
-		*GetNameSafe(this));
-	return false;
+	if (BestCandidates.IsEmpty())
+	{
+		return false;
+	}
+
+	OutLocation = BestCandidates[RuntimeRandomStream.RandRange(0, BestCandidates.Num() - 1)];
+	return true;
 }
 
 AArenaCombatBounds* AAnchorSpawnManager::ResolveArenaCombatBounds()
@@ -340,13 +399,49 @@ bool AAnchorSpawnManager::IsAnchorLocationClear(
 	const FVector& CandidateLocation) const
 {
 	const float MinimumSpacingSquared = FMath::Square(MinimumAnchorSpacing);
-	return !ManagedAnchors.ContainsByPredicate(
-		[CandidateLocation, MinimumSpacingSquared](const FManagedAnchor& Entry)
+	return GetClosestAnchorDistanceSquared(CandidateLocation)
+		>= MinimumSpacingSquared;
+}
+
+float AAnchorSpawnManager::GetClosestAnchorDistanceSquared(
+	const FVector& CandidateLocation) const
+{
+	float ClosestDistanceSquared = TNumericLimits<float>::Max();
+	for (const FManagedAnchor& Entry : ManagedAnchors)
+	{
+		if (Entry.Anchor.IsValid())
+		{
+			ClosestDistanceSquared = FMath::Min(
+				ClosestDistanceSquared,
+				FVector::DistSquared2D(
+					Entry.FinalTransform.GetLocation(),
+					CandidateLocation));
+		}
+	}
+	return ClosestDistanceSquared;
+}
+
+bool AAnchorSpawnManager::HasReachableActiveAnchor() const
+{
+	if (!bGuaranteeReachableAnchor)
+	{
+		return true;
+	}
+
+	const APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(this, 0);
+	if (!PlayerPawn)
+	{
+		return false;
+	}
+
+	const float ReachableDistanceSquared = FMath::Square(GuaranteedAnchorDistance);
+	return ManagedAnchors.ContainsByPredicate(
+		[PlayerPawn, ReachableDistanceSquared](const FManagedAnchor& Entry)
 		{
 			return Entry.Anchor.IsValid()
 				&& FVector::DistSquared2D(
 					Entry.FinalTransform.GetLocation(),
-					CandidateLocation) < MinimumSpacingSquared;
+					PlayerPawn->GetActorLocation()) <= ReachableDistanceSquared;
 		});
 }
 

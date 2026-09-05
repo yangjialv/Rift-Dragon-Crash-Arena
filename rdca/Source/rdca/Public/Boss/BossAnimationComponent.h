@@ -35,6 +35,10 @@ class RDCA_API UBossAnimationComponent : public UActorComponent
 
 public:
 	UBossAnimationComponent();
+	virtual void TickComponent(
+		float DeltaTime,
+		ELevelTick TickType,
+		FActorComponentTickFunction* ThisTickFunction) override;
 
 	UFUNCTION(BlueprintCallable, Category = "Boss|Animation")
 	void HandleAnimationEvent(EBossAnimationEvent AnimationEvent);
@@ -50,6 +54,19 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Animation|Setup")
 	bool bPlayIntroOnBeginPlay = true;
+
+	/** Fallback hold used only when no Ground Idle Montage is configured. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Animation|Intro",
+		meta = (ClampMin = "0.0", ClampMax = "5.0"))
+	float IntroGroundHoldDuration = 0.0f;
+
+	/** A looping grounded pose played before the Dragon's takeoff Intro. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Animation|Intro")
+	TObjectPtr<UAnimMontage> GroundIdleMontage;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Animation|Intro",
+		meta = (ClampMin = "0.0", ClampMax = "10.0"))
+	float GroundIdleDuration = 3.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Animation|Montages")
 	TObjectPtr<UAnimMontage> IntroMontage;
@@ -69,6 +86,11 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Animation|Montages")
 	TObjectPtr<UAnimMontage> StunMontage;
 
+	/** Blend-out time when the stun loop ends with the weak-point window. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Animation|Stun",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float StunLoopReleaseBlendOut = 0.12f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Animation|Montages")
 	TObjectPtr<UAnimMontage> DeathMontage;
 
@@ -85,8 +107,12 @@ private:
 		const FHitResult& Hit);
 
 	void HandleIntroMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+	void StartIntroMontage();
+	void ReleaseIntroGroundHold();
 	bool PlayMontage(UAnimMontage* Montage, FName StartSection = NAME_None);
 	void JumpSpellToSection(FName SectionName);
+	void TickStunLoop();
+	void StopStunLoop();
 	USkeletalMeshComponent* FindBossSkeletalMesh() const;
 
 	TWeakObjectPtr<USkeletalMeshComponent> BossMesh;
@@ -94,4 +120,7 @@ private:
 	TWeakObjectPtr<UBossWeakPointComponent> WeakPoint;
 	bool bIntroActive = false;
 	bool bIntroFinished = false;
+	bool bIntroTakeoffBroadcast = false;
+	FTimerHandle GroundIdleTimer;
+	FTimerHandle IntroGroundHoldTimer;
 };

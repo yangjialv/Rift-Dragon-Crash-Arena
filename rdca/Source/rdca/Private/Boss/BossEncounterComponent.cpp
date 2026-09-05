@@ -30,9 +30,20 @@ UBossEncounterComponent::UBossEncounterComponent()
 
 EBossCombatPhase UBossEncounterComponent::GetCombatPhase() const
 {
-	if (WeakPoint.IsValid() && WeakPoint->IsBossDefeated())
+	if (WeakPoint.IsValid())
 	{
-		return EBossCombatPhase::Dead;
+		if (WeakPoint->IsBossDefeated())
+		{
+			return EBossCombatPhase::Dead;
+		}
+
+		// Phase two begins at the damage threshold itself, rather than waiting
+		// for the next attack-selection pass. This lets the arena transition
+		// react on the decisive weak-point hit.
+		if (WeakPoint->GetCurrentHitPoints() <= 1)
+		{
+			return EBossCombatPhase::Phase2;
+		}
 	}
 	return CombatPhase;
 }
@@ -67,9 +78,10 @@ float UBossEncounterComponent::GetCurrentStateDuration() const
 			? Phase2InterAttackDelay
 			: RecoveryDuration;
 	case EBossEncounterState::WeakPointExposed:
-		return GetCombatPhase() == EBossCombatPhase::Phase2
+		return (GetCombatPhase() == EBossCombatPhase::Phase2
 			? Phase2WeakPointExposedDuration
-			: WeakPointExposedDuration;
+			: WeakPointExposedDuration)
+			* FMath::Max(WeakPointStunDurationMultiplier, 0.1f);
 	case EBossEncounterState::Dead:
 	default:
 		return 0.0f;

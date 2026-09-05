@@ -91,7 +91,17 @@ public:
 	bool IsGroundDashActive() const
 	{
 		return CrashState == EPhaseCrashState::Crashing
-			&& FMath::IsNearlyZero(ActiveArcHeight);
+			&& FMath::IsNearlyZero(ActiveArcHeight)
+			&& !bActiveBossCrash;
+	}
+
+	/** True while an attached player is pointing the left-click aim ray at the Boss. */
+	UFUNCTION(BlueprintPure, Category = "Phase Crash|Boss Aim")
+	bool IsBossAimActive() const
+	{
+		return CrashState == EPhaseCrashState::Charging
+			&& bChargingFromAttachment
+			&& bAimingAtBoss;
 	}
 
 	UFUNCTION(BlueprintPure, Category = "Phase Crash")
@@ -220,6 +230,11 @@ protected:
 		meta = (ClampMin = "0.01", ClampMax = "1.0"))
 	float AttachCornerTransitionDuration = 0.15f;
 
+	/** Straight-line speed used only when an attached player aims at the Boss. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Boss Aim",
+		meta = (ClampMin = "1.0"))
+	float BossCrashSpeed = 5200.0f;
+
 private:
 	bool UpdateAimTarget();
 	bool CalculateTrajectory(
@@ -269,6 +284,8 @@ private:
 	EPhaseCrashState CrashState = EPhaseCrashState::Ready;
 	bool bChargingFromAttachment = false;
 	bool bActiveCrashFromAttachment = false;
+	bool bAimingAtBoss = false;
+	bool bActiveBossCrash = false;
 	bool bWeakPointDamageAppliedThisCrash = false;
 	bool bCrashInputHeld = false;
 	bool bCrashInputBuffered = false;

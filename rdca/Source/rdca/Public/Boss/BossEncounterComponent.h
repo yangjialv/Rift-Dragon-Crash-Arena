@@ -159,6 +159,11 @@ protected:
 		meta = (ClampMin = "0.1"))
 	float WeakPointExposedDuration = 3.0f;
 
+	/** Applied to both Phase 1 and Phase 2 weak-point exposure (Boss stun) windows. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Timing",
+		meta = (ClampMin = "0.1"))
+	float WeakPointStunDurationMultiplier = 2.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Selection",
 		meta = (ClampMin = "1"))
 	int32 AttacksBeforeWeakPointExposure = 2;

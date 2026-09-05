@@ -36,7 +36,7 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anchor Spawning",
 		meta = (ClampMin = "1"))
-	int32 NumberOfAnchors = 3;
+	int32 NumberOfAnchors = 9;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anchor Spawning")
 	FName SpawnPointTag = TEXT("AnchorSpawnPoint");
@@ -68,6 +68,27 @@ protected:
 		meta = (EditCondition = "bUseArenaRandomSpawns", ClampMin = "0.0"))
 	float MinimumAnchorSpacing = 600.0f;
 
+	/**
+	 * Ensures that at least one active Anchor is within GuaranteedAnchorDistance
+	 * of the player. This avoids a random layout that makes the player cross the
+	 * entire arena before they can use the core mechanic.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anchor Spawning|Arena Random|Reachability",
+		meta = (EditCondition = "bUseArenaRandomSpawns"))
+	bool bGuaranteeReachableAnchor = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anchor Spawning|Arena Random|Reachability",
+		meta = (EditCondition = "bUseArenaRandomSpawns && bGuaranteeReachableAnchor", ClampMin = "100.0"))
+	float GuaranteedAnchorDistance = 1800.0f;
+
+	/**
+	 * Candidates within this fraction of the best coverage score may be chosen.
+	 * A small value keeps coverage even while preventing a fixed radial pattern.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anchor Spawning|Arena Random|Coverage",
+		meta = (EditCondition = "bUseArenaRandomSpawns", ClampMin = "0.0", ClampMax = "0.5"))
+	float CoverageRandomness = 0.15f;
+
 	/** Compensates for an imported Anchor mesh whose pivot is not at its base. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anchor Spawning|Arena Random",
 		meta = (EditCondition = "bUseArenaRandomSpawns"))
@@ -75,7 +96,7 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anchor Spawning|Arena Random",
 		meta = (EditCondition = "bUseArenaRandomSpawns", ClampMin = "1"))
-	int32 ArenaRandomAttempts = 24;
+	int32 ArenaRandomAttempts = 48;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anchor Spawning",
 		meta = (ToolTip = "Use -1 for a different layout each run. Use any non-negative value for a repeatable layout."))
@@ -114,8 +135,13 @@ private:
 	bool SpawnAnchorAtPoint(AActor& SpawnPoint);
 	bool SpawnAnchorAtTransform(const FTransform& FinalTransform, AActor* SpawnPoint);
 	bool SpawnAnchorAtRandomLocation();
+	bool ChooseBalancedArenaAnchorLocation(
+		bool bRequirePlayerReachability,
+		FVector& OutLocation);
 	AArenaCombatBounds* ResolveArenaCombatBounds();
 	bool IsAnchorLocationClear(const FVector& CandidateLocation) const;
+	float GetClosestAnchorDistanceSquared(const FVector& CandidateLocation) const;
+	bool HasReachableActiveAnchor() const;
 	AActor* ChooseAvailableSpawnPoint(const AActor* ExcludedPoint);
 	void SetAnchorInteractionEnabled(AActor& Anchor, bool bEnabled) const;
 
