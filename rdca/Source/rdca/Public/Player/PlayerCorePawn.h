@@ -7,8 +7,10 @@
 class UCameraComponent;
 class UInputAction;
 class UInputMappingContext;
+class UMeshComponent;
 class UPhaseCrashComponent;
 class UPlayerHealthComponent;
+class AArenaCombatBounds;
 class USphereComponent;
 class USpringArmComponent;
 class UStaticMeshComponent;
@@ -24,6 +26,33 @@ enum class EPlayerSlimeState : uint8
 	Dashing,
 	Airborne,
 	Attached
+};
+
+/** One editable endpoint of the radial Boss-combat camera. */
+USTRUCT(BlueprintType)
+struct FCombatCameraPoint
+{
+	GENERATED_BODY()
+
+	/** Spring-arm length at this endpoint. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera Point",
+		meta = (ClampMin = "100.0"))
+	float ArmLength = 1350.0f;
+
+	/** A shallower pitch presents the Boss instead of looking straight down. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera Point",
+		meta = (ClampMin = "-85.0", ClampMax = "-5.0"))
+	float Pitch = -28.0f;
+
+	/** Height above the player used as the base look-at focus. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera Point",
+		meta = (ClampMin = "-500.0", ClampMax = "2000.0"))
+	float FocusHeight = 100.0f;
+
+	/** Blend toward the Boss from the player. Keeps both characters in frame. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera Point",
+		meta = (ClampMin = "0.0", ClampMax = "0.5"))
+	float BossFramingWeight = 0.28f;
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
@@ -56,6 +85,9 @@ protected:
 private:
 	void FindBossCameraTarget();
 	void UpdateCombatCamera(float DeltaTime);
+	void UpdateCameraOccluders();
+	bool IsCameraOccluderActor(const AActor& Actor) const;
+	FVector GetCameraOcclusionCenter();
 	void UpdateSlimePresentation(float DeltaTime);
 	void SetSlimeState(EPlayerSlimeState NewState);
 	void Move(const FInputActionValue& Value);
@@ -101,37 +133,21 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Movement", meta = (ClampMin = "0.0"))
 	float MoveSpeed = 600.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Camera",
-		meta = (ClampMin = "100.0"))
-	float MinimumCameraArmLength = 1050.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Camera",
-		meta = (ClampMin = "100.0"))
-	float MaximumCameraArmLength = 5000.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Camera",
-		meta = (ClampMin = "0.1", ClampMax = "2.0"))
-	float CameraArmLengthPerBossDistance = 0.75f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Camera",
-		meta = (ClampMin = "100.0"))
-	float ArenaRadiusForMaximumZoom = 2600.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Camera",
-		meta = (ClampMin = "-85.0", ClampMax = "-15.0"))
-	float CombatCameraPitch = -55.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Camera",
-		meta = (ClampMin = "-85.0", ClampMax = "-15.0"))
-	float MaximumDistanceCameraPitch = -62.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Camera",
-		meta = (ClampMin = "0.0", ClampMax = "0.5"))
-	float BossFramingWeight = 0.5f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Camera",
+	/** Begins blending away from Near Camera Point at this player-to-Boss distance. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Camera|Two Point",
 		meta = (ClampMin = "0.0"))
-	float CameraFocusHeight = 120.0f;
+	float NearCameraPointDistance = 450.0f;
+
+	/** Reaches Far Camera Point at this player-to-Boss distance. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Camera|Two Point",
+		meta = (ClampMin = "1.0"))
+	float FarCameraPointDistance = 3000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Camera|Two Point")
+	FCombatCameraPoint NearCameraPoint;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Camera|Two Point")
+	FCombatCameraPoint FarCameraPoint;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Camera",
 		meta = (ClampMin = "0.1"))
@@ -140,6 +156,34 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Camera",
 		meta = (ClampMin = "0.1"))
 	float CameraRotationInterpSpeed = 8.0f;
+
+	/** Hide the rear radial pillar sector so the camera remains clean at the arena edge. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Camera|Occlusion")
+	bool bHideCameraOccluderPillars = true;
+
+	/** Existing Cyber/Code pillar mappings already use this prefix. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Camera|Occlusion")
+	FName CameraOccluderTagPrefix = TEXT("PhaseMap_Pillar");
+
+	/** At or inside this distance, use the larger Center Hidden Arc Degrees. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Camera|Occlusion",
+		meta = (ClampMin = "0.0"))
+	float CameraOcclusionCenterDistance = 400.0f;
+
+	/** At or beyond this distance, use the smaller Edge Hidden Arc Degrees. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Camera|Occlusion",
+		meta = (ClampMin = "1.0"))
+	float CameraOcclusionEdgeDistance = 3000.0f;
+
+	/** Wide rear sector near the Boss/arena centre. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Camera|Occlusion",
+		meta = (ClampMin = "0.0", ClampMax = "360.0"))
+	float CenterHiddenArcDegrees = 240.0f;
+
+	/** Narrow rear sector while the player is at the outer edge. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Camera|Occlusion",
+		meta = (ClampMin = "0.0", ClampMax = "360.0"))
+	float EdgeHiddenArcDegrees = 120.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Presentation",
 		meta = (ClampMin = "0.1"))
@@ -198,4 +242,7 @@ private:
 	float SurfaceImpactEnergy = 0.0f;
 	float DashReboundRemaining = 0.0f;
 	FVector PreviousAttachedNormal = FVector::ZeroVector;
+	FVector LastCameraOcclusionOutward = FVector::ForwardVector;
+	TWeakObjectPtr<AArenaCombatBounds> CameraOcclusionArenaBounds;
+	TSet<TWeakObjectPtr<UMeshComponent>> CameraOccludedComponents;
 };

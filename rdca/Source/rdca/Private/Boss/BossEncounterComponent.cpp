@@ -165,6 +165,10 @@ void UBossEncounterComponent::TickComponent(
 	{
 		return;
 	}
+	if (bIntroHold)
+	{
+		return;
+	}
 
 	StateElapsed += DeltaTime;
 	UpdateBossFacing(DeltaTime);
@@ -248,6 +252,40 @@ void UBossEncounterComponent::TickComponent(
 	default:
 		break;
 	}
+}
+
+void UBossEncounterComponent::SetIntroHold(const bool bHold)
+{
+	SetEncounterHold(bHold);
+}
+
+void UBossEncounterComponent::SetEncounterHold(const bool bHold)
+{
+	if (EncounterState == EBossEncounterState::Dead || bEncounterStopped)
+	{
+		return;
+	}
+	bIntroHold = bHold;
+	if (bIntroHold)
+	{
+		CurrentAttack = EBossAttackType::None;
+		StateElapsed = 0.0f;
+		if (EncounterState != EBossEncounterState::Idle)
+		{
+			SetEncounterState(EBossEncounterState::Idle);
+		}
+	}
+	else
+	{
+		StateElapsed = 0.0f;
+	}
+
+	UE_LOG(
+		LogRDCAPlayer,
+		Log,
+		TEXT("Boss encounter hold changed. Boss=%s Held=%s"),
+		*GetNameSafe(GetOwner()),
+		bIntroHold ? TEXT("true") : TEXT("false"));
 }
 
 void UBossEncounterComponent::StopEncounter()

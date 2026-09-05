@@ -9,7 +9,8 @@
 
 # Local third-party reference assets
 rdca/Content/sA_Megapack_v1/
-
+rdca/Content/StylizedUndeadBundle/
+rdca/Content/__ExternalActors__/ThirdPerson/Maps/ThirdPersonMap/D/SY/Z4CTQ4LG3YV10EKPD0UE8Q.uasset
 # Visual Studio and IDE-generated files
 **/.vs/
 **/.vscode/

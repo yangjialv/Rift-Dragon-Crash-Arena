@@ -305,6 +305,46 @@ void UPhaseCrashComponent::StartGroundDash()
 		CrashDuration);
 }
 
+void UPhaseCrashComponent::ForceArenaRecovery(
+	const FVector& Destination,
+	const float ArcHeight,
+	const float Duration)
+{
+	if (!OwnerPawn || !OwnerPawn->GetRootComponent())
+	{
+		return;
+	}
+
+	if (UPawnMovementComponent* Movement = OwnerPawn->GetMovementComponent())
+	{
+		Movement->StopMovementImmediately();
+	}
+	DetachFromCrashTarget();
+	ClearTemporaryMoveIgnores();
+	bChargingFromAttachment = false;
+	bActiveCrashFromAttachment = false;
+	bWeakPointDamageAppliedThisCrash = false;
+	bCrashInputBuffered = false;
+	DashInputBufferRemaining = 0.0f;
+	CrashStart = OwnerPawn->GetActorLocation();
+	CrashEnd = Destination;
+	ActiveArcHeight = FMath::Max(ArcHeight, 0.0f);
+	CrashElapsed = 0.0f;
+	CrashDuration = FMath::Max(Duration, MinimumFlightDuration);
+	ActiveCooldownDuration = GroundDashCooldown;
+	VerticalVelocity = 0.0f;
+	SetCrashState(EPhaseCrashState::Crashing);
+
+	UE_LOG(
+		LogRDCAPlayer,
+		Log,
+		TEXT("Arena recovery launched. Start=%s End=%s Height=%.1f Duration=%.2f"),
+		*CrashStart.ToCompactString(),
+		*CrashEnd.ToCompactString(),
+		ActiveArcHeight,
+		CrashDuration);
+}
+
 void UPhaseCrashComponent::ConsumeBufferedInputs(const float DeltaTime)
 {
 	DashInputBufferRemaining = FMath::Max(

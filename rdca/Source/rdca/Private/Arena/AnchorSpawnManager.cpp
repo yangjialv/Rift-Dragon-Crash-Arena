@@ -1,5 +1,6 @@
 #include "Arena/AnchorSpawnManager.h"
 
+#include "Arena/ArenaCombatBounds.h"
 #include "Arena/AttachSurfaceComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Kismet/GameplayStatics.h"
@@ -64,10 +65,19 @@ void AAnchorSpawnManager::Tick(const float DeltaSeconds)
 			continue;
 		}
 
-		if (AActor* Point = ChooseAvailableSpawnPoint(
-				Pending.PreviousSpawnPoint.Get()))
+		const bool bSpawnedReplacement = bUseArenaRandomSpawns
+			? SpawnAnchorAtRandomLocation()
+			: [&Pending, this]()
+			{
+				if (AActor* Point = ChooseAvailableSpawnPoint(
+						Pending.PreviousSpawnPoint.Get()))
+				{
+					return SpawnAnchorAtPoint(*Point);
+				}
+				return false;
+			}();
+		if (bSpawnedReplacement)
 		{
-			SpawnAnchorAtPoint(*Point);
 			PendingReplacements.RemoveAtSwap(Index);
 		}
 	}
@@ -98,33 +108,52 @@ void AAnchorSpawnManager::SpawnAnchors()
 		return;
 	}
 
-	CacheCandidatePoints();
-
-	if (CandidateSpawnPoints.IsEmpty())
+	if (bUseArenaRandomSpawns)
 	{
-		UE_LOG(
-			LogRDCAPlayer,
-			Warning,
-			TEXT("Anchor spawn skipped. Manager=%s No actors found with tag '%s'."),
-			*GetNameSafe(this),
-			*SpawnPointTag.ToString());
-		return;
-	}
-
-	for (int32 Index = CandidateSpawnPoints.Num() - 1; Index > 0; --Index)
-	{
-		const int32 SwapIndex = RuntimeRandomStream.RandRange(0, Index);
-		CandidateSpawnPoints.Swap(Index, SwapIndex);
-	}
-
-	const int32 SpawnCount = FMath::Min(
-		FMath::Max(NumberOfAnchors, 1),
-		CandidateSpawnPoints.Num());
-	for (int32 Index = 0; Index < SpawnCount; ++Index)
-	{
-		if (AActor* SpawnPoint = CandidateSpawnPoints[Index].Get())
+		if (!ResolveArenaCombatBounds())
 		{
-			SpawnAnchorAtPoint(*SpawnPoint);
+			UE_LOG(
+				LogRDCAPlayer,
+				Warning,
+				TEXT("Anchor arena-random spawn skipped. Manager=%s Arena Combat Bounds is not assigned."),
+				*GetNameSafe(this));
+			return;
+		}
+		for (int32 Index = 0; Index < NumberOfAnchors; ++Index)
+		{
+			SpawnAnchorAtRandomLocation();
+		}
+	}
+	else
+	{
+		CacheCandidatePoints();
+
+		if (CandidateSpawnPoints.IsEmpty())
+		{
+			UE_LOG(
+				LogRDCAPlayer,
+				Warning,
+				TEXT("Anchor spawn skipped. Manager=%s No actors found with tag '%s'."),
+				*GetNameSafe(this),
+				*SpawnPointTag.ToString());
+			return;
+		}
+
+		for (int32 Index = CandidateSpawnPoints.Num() - 1; Index > 0; --Index)
+		{
+			const int32 SwapIndex = RuntimeRandomStream.RandRange(0, Index);
+			CandidateSpawnPoints.Swap(Index, SwapIndex);
+		}
+
+		const int32 SpawnCount = FMath::Min(
+			FMath::Max(NumberOfAnchors, 1),
+			CandidateSpawnPoints.Num());
+		for (int32 Index = 0; Index < SpawnCount; ++Index)
+		{
+			if (AActor* SpawnPoint = CandidateSpawnPoints[Index].Get())
+			{
+				SpawnAnchorAtPoint(*SpawnPoint);
+			}
 		}
 	}
 
@@ -215,7 +244,13 @@ void AAnchorSpawnManager::CacheCandidatePoints()
 
 bool AAnchorSpawnManager::SpawnAnchorAtPoint(AActor& SpawnPoint)
 {
-	FTransform FinalTransform = SpawnPoint.GetActorTransform();
+	return SpawnAnchorAtTransform(SpawnPoint.GetActorTransform(), &SpawnPoint);
+}
+
+bool AAnchorSpawnManager::SpawnAnchorAtTransform(
+	const FTransform& FinalTransform,
+	AActor* SpawnPoint)
+{
 	FTransform InitialTransform = FinalTransform;
 	const FVector StartLocation =
 		FinalTransform.GetLocation() - FVector::UpVector * EmergenceDepth;
@@ -238,7 +273,7 @@ bool AAnchorSpawnManager::SpawnAnchorAtPoint(AActor& SpawnPoint)
 	SpawnedAnchors.Add(SpawnedAnchor);
 	FManagedAnchor& Entry = ManagedAnchors.AddDefaulted_GetRef();
 	Entry.Anchor = SpawnedAnchor;
-	Entry.SpawnPoint = &SpawnPoint;
+	Entry.SpawnPoint = SpawnPoint;
 	Entry.FinalTransform = FinalTransform;
 	Entry.StartLocation = StartLocation;
 	Entry.EmergenceElapsed = 0.0f;
@@ -254,10 +289,65 @@ bool AAnchorSpawnManager::SpawnAnchorAtPoint(AActor& SpawnPoint)
 		Log,
 		TEXT("Anchor emerging. Anchor=%s Point=%s Depth=%.1f Duration=%.2f"),
 		*GetNameSafe(SpawnedAnchor),
-		*GetNameSafe(&SpawnPoint),
+		*GetNameSafe(SpawnPoint),
 		EmergenceDepth,
 		EmergenceDuration);
 	return true;
+}
+
+bool AAnchorSpawnManager::SpawnAnchorAtRandomLocation()
+{
+	AArenaCombatBounds* Bounds = ResolveArenaCombatBounds();
+	if (!Bounds)
+	{
+		return false;
+	}
+
+	for (int32 Attempt = 0; Attempt < FMath::Max(ArenaRandomAttempts, 1); ++Attempt)
+	{
+		FVector CandidateLocation;
+		if (!Bounds->GetRandomAnchorLocation(
+				RuntimeRandomStream,
+				ArenaInnerClearance,
+				ArenaOuterClearance,
+				CandidateLocation)
+			|| !IsAnchorLocationClear(CandidateLocation))
+		{
+			continue;
+		}
+		CandidateLocation.Z += ArenaSpawnHeightOffset;
+
+		return SpawnAnchorAtTransform(
+			FTransform(GetActorQuat(), CandidateLocation),
+			nullptr);
+	}
+
+	UE_LOG(
+		LogRDCAPlayer,
+		Warning,
+		TEXT("Anchor arena-random spawn failed after %d attempts. Manager=%s"),
+		ArenaRandomAttempts,
+		*GetNameSafe(this));
+	return false;
+}
+
+AArenaCombatBounds* AAnchorSpawnManager::ResolveArenaCombatBounds()
+{
+	return ArenaCombatBounds;
+}
+
+bool AAnchorSpawnManager::IsAnchorLocationClear(
+	const FVector& CandidateLocation) const
+{
+	const float MinimumSpacingSquared = FMath::Square(MinimumAnchorSpacing);
+	return !ManagedAnchors.ContainsByPredicate(
+		[CandidateLocation, MinimumSpacingSquared](const FManagedAnchor& Entry)
+		{
+			return Entry.Anchor.IsValid()
+				&& FVector::DistSquared2D(
+					Entry.FinalTransform.GetLocation(),
+					CandidateLocation) < MinimumSpacingSquared;
+		});
 }
 
 AActor* AAnchorSpawnManager::ChooseAvailableSpawnPoint(

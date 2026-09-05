@@ -101,3 +101,47 @@ Run `tools/parse_combat_log.py` against the latest Unreal log to generate this r
 - [ ] Boss weak-point collision and visible mesh share `WeakPointOrigin`.
 - [ ] Moving an origin component changes only that system and requires no C++ edit.
 - [ ] Removing any optional origin falls back to the previous placeholder behavior.
+
+## Manual Test: Combat Camera Pillar Occlusion
+
+- [ ] A matching `PhaseMap_Pillar*` tag in either Actor Tags or the pillar mesh's Component Tags is recognised. At the outer arena edge, the 120-degree rear sector centred on the Player's outward radial direction hides those pillars.
+- [ ] Moving toward the arena centre smoothly expands the rear hidden sector toward 240 degrees.
+- [ ] Pillars outside the current radial hidden sector remain visible.
+- [ ] Phase-hidden Cyber/Code pillar variants remain hidden; occlusion restoration never reveals the inactive phase's pillar.
+- [ ] Turning off `Hide Camera Occluder Pillars` restores every pillar hidden by this feature.
+
+## Manual Test: Boss Animation Scheduling
+
+- [ ] FlyIdle loops through `ABP_Dragon` while no Montage is active.
+- [ ] Intro Montage holds the encounter and no attack is selected before it finishes.
+- [ ] Intro completion returns to FlyIdle and releases the encounter exactly once.
+- [ ] AimedVolley and FanBarrage play the Attack Montage.
+- [ ] Shockwave plays the Roar Montage.
+- [ ] SweepLaser enters Spell Start during warning, Loop during the active sweep, and End during recovery.
+- [ ] An effective weak-point crash plays Hit and exposure plays Stun.
+- [ ] Death interrupts active Montages, plays Death, and never returns to FlyIdle.
+- [ ] Missing optional Montages do not block the combat state machine.
+- [ ] IntroTakeoff fires once at the marked frame and triggers only the intro platform fracture.
+
+## Manual Test: Arena Phase Transition
+
+- [ ] `ArenaPhaseController` finds one complete Cyber/Source pair for `PhaseMap_RingFloor` and each pillar tag.
+- [ ] Phase 1 starts with only Cyber Rift actors visible; the Cyber ring has collision and the Source ring has none.
+- [ ] When the Boss first enters Phase 2, combat pauses for `ExpansionDuration` and the expansion begins at `ArenaPhaseOrigin`.
+- [ ] Each `PhaseMap_PillarXX` pair switches only when the expansion radius reaches its placement distance.
+- [ ] At `RingRevealRadius`, the Source ring collision is enabled before Cyber ring collision is disabled; the player never falls.
+- [ ] At the end, all Source Code Void actors are visible, all Cyber Rift actors are hidden, and combat resumes once.
+- [ ] With `bUseMaterialSphereMask` disabled, the object-level transition is correct and needs no material setup.
+- [ ] With a configured `MPC_ArenaPhase` and matching environment materials, the visible boundary is a sphere centred on `ArenaPhaseOrigin`.
+
+## Manual Test: Arena Bounds and Floor Proxy
+
+- [ ] `Arena Combat Bounds` and the separate `Arena Floor Collision` Actor are placed at the ring centre and at the visible floor height.
+- [ ] Walking, dashing, and a maximum-distance crash stop at the invisible outer wall.
+- [ ] Boss projectiles and the sweep laser are not stopped by the outer wall.
+- [ ] The invisible Floor Disc supports the arena without enabling collision on either high-triangle visual ring.
+- [ ] The visible Inner Boundary disc accurately marks the circular low air wall at the Boss centre.
+- [ ] Ground movement is blocked by the inner air wall, while a high crash can pass over it to reach the Boss.
+- [ ] Enabling `Use Arena Random Spawns` on Anchor Spawn Manager creates every Anchor between the configured inner and outer clearances.
+- [ ] Randomly generated Anchors preserve emergence, overload destruction, and delayed replacement behavior.
+- [ ] `Minimum Anchor Spacing` prevents two simultaneously active Anchors from occupying the same tactical position.

@@ -4,6 +4,8 @@
 #include "GameFramework/Actor.h"
 #include "AnchorSpawnManager.generated.h"
 
+class AArenaCombatBounds;
+
 UCLASS(Blueprintable)
 class RDCA_API AAnchorSpawnManager : public AActor
 {
@@ -42,6 +44,39 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anchor Spawning")
 	bool bSpawnOnBeginPlay = true;
 
+	/**
+	 * Generates anchors directly in the Combat Bounds annulus instead of choosing
+	 * from manually placed AnchorSpawnPoint actors.  The manual mode remains the
+	 * default so existing layouts are unaffected until this is enabled.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anchor Spawning|Arena Random")
+	bool bUseArenaRandomSpawns = false;
+
+	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "Anchor Spawning|Arena Random",
+		meta = (EditCondition = "bUseArenaRandomSpawns"))
+	TObjectPtr<AArenaCombatBounds> ArenaCombatBounds;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anchor Spawning|Arena Random",
+		meta = (EditCondition = "bUseArenaRandomSpawns", ClampMin = "0.0"))
+	float ArenaInnerClearance = 280.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anchor Spawning|Arena Random",
+		meta = (EditCondition = "bUseArenaRandomSpawns", ClampMin = "0.0"))
+	float ArenaOuterClearance = 550.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anchor Spawning|Arena Random",
+		meta = (EditCondition = "bUseArenaRandomSpawns", ClampMin = "0.0"))
+	float MinimumAnchorSpacing = 600.0f;
+
+	/** Compensates for an imported Anchor mesh whose pivot is not at its base. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anchor Spawning|Arena Random",
+		meta = (EditCondition = "bUseArenaRandomSpawns"))
+	float ArenaSpawnHeightOffset = 0.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anchor Spawning|Arena Random",
+		meta = (EditCondition = "bUseArenaRandomSpawns", ClampMin = "1"))
+	int32 ArenaRandomAttempts = 24;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anchor Spawning",
 		meta = (ToolTip = "Use -1 for a different layout each run. Use any non-negative value for a repeatable layout."))
 	int32 RandomSeed = -1;
@@ -77,6 +112,10 @@ private:
 
 	void CacheCandidatePoints();
 	bool SpawnAnchorAtPoint(AActor& SpawnPoint);
+	bool SpawnAnchorAtTransform(const FTransform& FinalTransform, AActor* SpawnPoint);
+	bool SpawnAnchorAtRandomLocation();
+	AArenaCombatBounds* ResolveArenaCombatBounds();
+	bool IsAnchorLocationClear(const FVector& CandidateLocation) const;
 	AActor* ChooseAvailableSpawnPoint(const AActor* ExcludedPoint);
 	void SetAnchorInteractionEnabled(AActor& Anchor, bool bEnabled) const;
 

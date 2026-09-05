@@ -125,6 +125,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Phase Crash")
 	void ForceDetachFromAttachment();
 
+	/** Used by the arena recovery volume after the player falls through the centre void. */
+	UFUNCTION(BlueprintCallable, Category = "Phase Crash|Arena")
+	void ForceArenaRecovery(
+		const FVector& Destination,
+		float ArcHeight,
+		float Duration);
+
 	UPROPERTY(BlueprintAssignable, Category = "Phase Crash")
 	FOnPhaseCrashStateChanged OnCrashStateChanged;
 

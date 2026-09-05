@@ -117,6 +117,20 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Boss|Encounter")
 	void StopEncounter();
 
+	UFUNCTION(BlueprintCallable, Category = "Boss|Encounter|Intro")
+	void SetIntroHold(bool bHold);
+
+	UFUNCTION(BlueprintPure, Category = "Boss|Encounter|Intro")
+	bool IsIntroHeld() const { return bIntroHold; }
+
+	// Pauses the state machine for a short in-world transition.  SetIntroHold is
+	// kept for the existing intro Blueprint and calls through to this function.
+	UFUNCTION(BlueprintCallable, Category = "Boss|Encounter")
+	void SetEncounterHold(bool bHold);
+
+	UFUNCTION(BlueprintPure, Category = "Boss|Encounter")
+	bool IsEncounterHeld() const { return bIntroHold; }
+
 	UPROPERTY(BlueprintAssignable, Category = "Boss|Encounter")
 	FOnBossEncounterStateChanged OnEncounterStateChanged;
 
@@ -341,6 +355,7 @@ private:
 	float PreviousShockwaveRadius = 0.0f;
 	bool bPlayerDamagedThisAttack = false;
 	bool bEncounterStopped = false;
+	bool bIntroHold = false;
 	int32 CompletedAttacksSinceExposure = 0;
 	int32 AimedVolleyShotsFired = 0;
 	float AimedVolleyShotElapsed = 0.0f;

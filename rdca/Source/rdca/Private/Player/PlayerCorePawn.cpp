@@ -1,9 +1,12 @@
 #include "Player/PlayerCorePawn.h"
 
+#include "Arena/ArenaCombatBounds.h"
 #include "Boss/BossEncounterComponent.h"
 #include "Camera/CameraComponent.h"
+#include "Components/ActorComponent.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/MeshComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
@@ -22,6 +25,10 @@
 APlayerCorePawn::APlayerCorePawn()
 {
 	PrimaryActorTick.bCanEverTick = true;
+	FarCameraPoint.ArmLength = 3000.0f;
+	FarCameraPoint.Pitch = -36.0f;
+	FarCameraPoint.FocusHeight = 170.0f;
+	FarCameraPoint.BossFramingWeight = 0.36f;
 
 	CollisionComponent = CreateDefaultSubobject<USphereComponent>(TEXT("Collision"));
 	SetRootComponent(CollisionComponent);
@@ -453,8 +460,11 @@ void APlayerCorePawn::UpdateCombatCamera(const float DeltaTime)
 		FindBossCameraTarget();
 	}
 
-	FVector DesiredTargetOffset(0.0f, 0.0f, CameraFocusHeight);
-	float DesiredArmLength = MinimumCameraArmLength;
+	FVector DesiredTargetOffset(
+		0.0f,
+		0.0f,
+		NearCameraPoint.FocusHeight);
+	float DesiredArmLength = NearCameraPoint.ArmLength;
 	if (BossCameraTarget.IsValid())
 	{
 		const FVector PlayerLocation = GetActorLocation();
@@ -463,21 +473,31 @@ void APlayerCorePawn::UpdateCombatCamera(const float DeltaTime)
 		FVector ToBoss = PlayerToBoss;
 		ToBoss.Z = 0.0f;
 		const float PlayerBossDistance = ToBoss.Size();
-		const float ZoomAlpha = FMath::Clamp(
-			PlayerBossDistance / FMath::Max(ArenaRadiusForMaximumZoom, 100.0f),
+		const float DistanceRange = FMath::Max(
+			FarCameraPointDistance - NearCameraPointDistance,
+			1.0f);
+		const float CameraAlpha = FMath::Clamp(
+			(PlayerBossDistance - NearCameraPointDistance) / DistanceRange,
 			0.0f,
 			1.0f);
-		DesiredTargetOffset += PlayerToBoss * FMath::Clamp(
-			BossFramingWeight,
-			0.0f,
-			0.5f);
+		const float FocusHeight = FMath::Lerp(
+			NearCameraPoint.FocusHeight,
+			FarCameraPoint.FocusHeight,
+			CameraAlpha);
+		const float BossWeight = FMath::Lerp(
+			NearCameraPoint.BossFramingWeight,
+			FarCameraPoint.BossFramingWeight,
+			CameraAlpha);
+		const float Pitch = FMath::Lerp(
+			NearCameraPoint.Pitch,
+			FarCameraPoint.Pitch,
+			CameraAlpha);
+		DesiredTargetOffset = FVector(0.0f, 0.0f, FocusHeight)
+			+ PlayerToBoss * FMath::Clamp(BossWeight, 0.0f, 0.5f);
 		if (ToBoss.Normalize())
 		{
 			const FRotator DesiredRotation(
-				FMath::Lerp(
-					CombatCameraPitch,
-					MaximumDistanceCameraPitch,
-					ZoomAlpha),
+				Pitch,
 				ToBoss.Rotation().Yaw,
 				0.0f);
 			SpringArm->SetWorldRotation(FMath::RInterpTo(
@@ -487,16 +507,15 @@ void APlayerCorePawn::UpdateCombatCamera(const float DeltaTime)
 				CameraRotationInterpSpeed));
 		}
 
-		DesiredArmLength = FMath::Clamp(
-			MinimumCameraArmLength
-				+ PlayerBossDistance * CameraArmLengthPerBossDistance,
-			MinimumCameraArmLength,
-			FMath::Max(MaximumCameraArmLength, MinimumCameraArmLength));
+		DesiredArmLength = FMath::Lerp(
+			NearCameraPoint.ArmLength,
+			FarCameraPoint.ArmLength,
+			CameraAlpha);
 	}
 	else
 	{
 		const FRotator FallbackRotation(
-			CombatCameraPitch,
+			NearCameraPoint.Pitch,
 			-45.0f,
 			0.0f);
 		SpringArm->SetWorldRotation(FMath::RInterpTo(
@@ -520,6 +539,173 @@ void APlayerCorePawn::UpdateCombatCamera(const float DeltaTime)
 		DesiredArmLength,
 		DeltaTime,
 		FramingInterpSpeed);
+	UpdateCameraOccluders();
+}
+
+void APlayerCorePawn::UpdateCameraOccluders()
+{
+	if (!bHideCameraOccluderPillars || !GetWorld())
+	{
+		for (const TWeakObjectPtr<UMeshComponent>& Component : CameraOccludedComponents)
+		{
+			if (Component.IsValid())
+			{
+				Component->SetVisibility(true, true);
+			}
+		}
+		CameraOccludedComponents.Reset();
+		return;
+	}
+
+	const FVector ArenaCenter = GetCameraOcclusionCenter();
+	FVector PlayerOutward = GetActorLocation() - ArenaCenter;
+	PlayerOutward.Z = 0.0f;
+	const float PlayerCenterDistance = PlayerOutward.Size();
+	if (!PlayerOutward.Normalize())
+	{
+		PlayerOutward = LastCameraOcclusionOutward;
+	}
+	else
+	{
+		LastCameraOcclusionOutward = PlayerOutward;
+	}
+	const float DistanceRange = FMath::Max(
+		CameraOcclusionEdgeDistance - CameraOcclusionCenterDistance,
+		1.0f);
+	const float DistanceAlpha = FMath::Clamp(
+		(PlayerCenterDistance - CameraOcclusionCenterDistance) / DistanceRange,
+		0.0f,
+		1.0f);
+	const float HiddenArcDegrees = FMath::Lerp(
+		CenterHiddenArcDegrees,
+		EdgeHiddenArcDegrees,
+		DistanceAlpha);
+	const float MaximumAngle = HiddenArcDegrees * 0.5f;
+
+	TSet<UMeshComponent*> DesiredOccludedComponents;
+	for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+	{
+		AActor* Candidate = *It;
+		if (!IsValid(Candidate) || Candidate == this || Candidate->IsHidden()
+			|| !IsCameraOccluderActor(*Candidate))
+		{
+			continue;
+		}
+
+		FVector PillarOutward = Candidate->GetActorLocation() - ArenaCenter;
+		PillarOutward.Z = 0.0f;
+		if (!PillarOutward.Normalize())
+		{
+			continue;
+		}
+		const float PillarAngle = FMath::RadiansToDegrees(FMath::Acos(
+			FMath::Clamp(
+				FVector::DotProduct(PlayerOutward, PillarOutward),
+				-1.0f,
+				1.0f)));
+		if (PillarAngle > MaximumAngle)
+		{
+			continue;
+		}
+
+		TArray<UMeshComponent*> MeshComponents;
+		Candidate->GetComponents<UMeshComponent>(MeshComponents);
+		for (UMeshComponent* MeshComponent : MeshComponents)
+		{
+			if (MeshComponent && (MeshComponent->IsVisible()
+				|| CameraOccludedComponents.Contains(MeshComponent)))
+			{
+				DesiredOccludedComponents.Add(MeshComponent);
+			}
+		}
+	}
+
+	for (auto It = CameraOccludedComponents.CreateIterator(); It; ++It)
+	{
+		UMeshComponent* Component = It->Get();
+		if (!Component || !DesiredOccludedComponents.Contains(Component))
+		{
+			if (Component)
+			{
+				// Actor-level Phase switching may still keep this component hidden.
+				// Restoring component visibility never overrides that actor-level state.
+				Component->SetVisibility(true, true);
+			}
+			It.RemoveCurrent();
+		}
+	}
+
+	for (UMeshComponent* Component : DesiredOccludedComponents)
+	{
+		if (Component)
+		{
+			Component->SetVisibility(false, true);
+			CameraOccludedComponents.Add(Component);
+		}
+	}
+}
+
+FVector APlayerCorePawn::GetCameraOcclusionCenter()
+{
+	if (!CameraOcclusionArenaBounds.IsValid() && GetWorld())
+	{
+		for (TActorIterator<AArenaCombatBounds> It(GetWorld()); It; ++It)
+		{
+			CameraOcclusionArenaBounds = *It;
+			break;
+		}
+	}
+	if (CameraOcclusionArenaBounds.IsValid())
+	{
+		return CameraOcclusionArenaBounds->GetArenaCenter();
+	}
+	return BossCameraTarget.IsValid()
+		? BossCameraTarget->GetActorLocation()
+		: FVector::ZeroVector;
+}
+
+bool APlayerCorePawn::IsCameraOccluderActor(const AActor& Actor) const
+{
+	const FString Prefix = CameraOccluderTagPrefix.ToString();
+	if (Prefix.IsEmpty())
+	{
+		return false;
+	}
+
+	const auto MatchesPillarTag = [&Prefix](const FName Tag)
+	{
+		return Tag.ToString().StartsWith(Prefix, ESearchCase::IgnoreCase);
+	};
+
+	for (const FName Tag : Actor.Tags)
+	{
+		if (MatchesPillarTag(Tag))
+		{
+			return true;
+		}
+	}
+
+	// Blueprint users commonly place PhaseMap tags in the Static Mesh component's
+	// Component Tags field. Support that placement as well as Actor Tags.
+	TArray<UActorComponent*> Components;
+	Actor.GetComponents<UActorComponent>(Components);
+	for (const UActorComponent* Component : Components)
+	{
+		if (!IsValid(Component))
+		{
+			continue;
+		}
+
+		for (const FName Tag : Component->ComponentTags)
+		{
+			if (MatchesPillarTag(Tag))
+			{
+				return true;
+			}
+		}
+	}
+
+	return false;
 }
 
 void APlayerCorePawn::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
