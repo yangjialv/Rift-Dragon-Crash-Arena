@@ -121,6 +121,8 @@ private:
 	bool bIntroActive = false;
 	bool bIntroFinished = false;
 	bool bIntroTakeoffBroadcast = false;
+	/** A successful weak-point hit ends the visual stun for this exposure window. */
+	bool bWeakPointHitDuringExposure = false;
 	FTimerHandle GroundIdleTimer;
 	FTimerHandle IntroGroundHoldTimer;
 };

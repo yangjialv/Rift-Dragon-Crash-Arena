@@ -1,8 +1,9 @@
 #include "Arena/AnchorSpawnManager.h"
 
-#include "Arena/ArenaCombatBounds.h"
+#include "Arena/ArenaFloorCollision.h"
 #include "Arena/AttachSurfaceComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "rdca.h"
 
@@ -110,12 +111,12 @@ void AAnchorSpawnManager::SpawnAnchors()
 
 	if (bUseArenaRandomSpawns)
 	{
-		if (!ResolveArenaCombatBounds())
+		if (!ResolveArenaFloorCollision())
 		{
 			UE_LOG(
 				LogRDCAPlayer,
 				Warning,
-				TEXT("Anchor arena-random spawn skipped. Manager=%s Arena Combat Bounds is not assigned."),
+				TEXT("Anchor arena-random spawn skipped. Manager=%s Arena Floor Collision is not assigned."),
 				*GetNameSafe(this));
 			return;
 		}
@@ -269,6 +270,19 @@ bool AAnchorSpawnManager::SpawnAnchorAtTransform(
 		return false;
 	}
 
+	// Arena-random Anchors inherit the floor transform. The floor is therefore
+	// both the source of valid spawn coordinates and the spatial parent should a
+	// future arena move, rotate, or phase-shift as one piece.
+	if (bUseArenaRandomSpawns)
+	{
+		if (AArenaFloorCollision* FloorCollision = ResolveArenaFloorCollision())
+		{
+			SpawnedAnchor->AttachToActor(
+				FloorCollision,
+				FAttachmentTransformRules::KeepWorldTransform);
+		}
+	}
+
 	SetAnchorInteractionEnabled(*SpawnedAnchor, false);
 	SpawnedAnchors.Add(SpawnedAnchor);
 	FManagedAnchor& Entry = ManagedAnchors.AddDefaulted_GetRef();
@@ -297,8 +311,8 @@ bool AAnchorSpawnManager::SpawnAnchorAtTransform(
 
 bool AAnchorSpawnManager::SpawnAnchorAtRandomLocation()
 {
-	AArenaCombatBounds* Bounds = ResolveArenaCombatBounds();
-	if (!Bounds)
+	AArenaFloorCollision* FloorCollision = ResolveArenaFloorCollision();
+	if (!FloorCollision)
 	{
 		return false;
 	}
@@ -333,8 +347,8 @@ bool AAnchorSpawnManager::ChooseBalancedArenaAnchorLocation(
 	const bool bRequirePlayerReachability,
 	FVector& OutLocation)
 {
-	AArenaCombatBounds* Bounds = ResolveArenaCombatBounds();
-	if (!Bounds)
+	AArenaFloorCollision* FloorCollision = ResolveArenaFloorCollision();
+	if (!FloorCollision)
 	{
 		return false;
 	}
@@ -350,7 +364,7 @@ bool AAnchorSpawnManager::ChooseBalancedArenaAnchorLocation(
 	for (int32 Attempt = 0; Attempt < FMath::Max(ArenaRandomAttempts, 1); ++Attempt)
 	{
 		FVector CandidateLocation;
-		if (!Bounds->GetRandomAnchorLocation(
+		if (!FloorCollision->GetRandomAnchorLocation(
 				RuntimeRandomStream,
 				ArenaInnerClearance,
 				ArenaOuterClearance,
@@ -390,9 +404,24 @@ bool AAnchorSpawnManager::ChooseBalancedArenaAnchorLocation(
 	return true;
 }
 
-AArenaCombatBounds* AAnchorSpawnManager::ResolveArenaCombatBounds()
+AArenaFloorCollision* AAnchorSpawnManager::ResolveArenaFloorCollision()
 {
-	return ArenaCombatBounds;
+	if (ArenaFloorCollision)
+	{
+		return ArenaFloorCollision;
+	}
+
+	if (!GetWorld())
+	{
+		return nullptr;
+	}
+
+	for (TActorIterator<AArenaFloorCollision> It(GetWorld()); It; ++It)
+	{
+		ArenaFloorCollision = *It;
+		return ArenaFloorCollision;
+	}
+	return nullptr;
 }
 
 bool AAnchorSpawnManager::IsAnchorLocationClear(

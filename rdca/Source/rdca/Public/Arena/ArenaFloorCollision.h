@@ -4,11 +4,15 @@
 #include "GameFramework/Actor.h"
 #include "ArenaFloorCollision.generated.h"
 
-class AArenaCombatBounds;
+class UBoxComponent;
 class USceneComponent;
 class UStaticMeshComponent;
 
-/** A separate, low-cost circular floor collision proxy for the visual arena rings. */
+/**
+ * A low-cost physical annulus for the visual arena rings. Its central hole is
+ * intentional: falling through it is handled separately by a placed recovery
+ * volume, not by Combat Bounds.
+ */
 UCLASS(BlueprintType, Blueprintable)
 class RDCA_API AArenaFloorCollision : public AActor
 {
@@ -17,6 +21,25 @@ class RDCA_API AArenaFloorCollision : public AActor
 public:
 	AArenaFloorCollision();
 
+	UFUNCTION(BlueprintPure, Category = "Arena Floor Collision")
+	FVector GetFloorCenter() const { return GetActorLocation(); }
+
+	UFUNCTION(BlueprintPure, Category = "Arena Floor Collision")
+	float GetInnerHoleRadius() const { return InnerHoleRadius; }
+
+	UFUNCTION(BlueprintPure, Category = "Arena Floor Collision")
+	float GetOuterFloorRadius() const { return FloorRadius; }
+
+	/** Random point on the actual walkable annulus, uniformly distributed by area. */
+	bool GetRandomAnchorLocation(
+		FRandomStream& RandomStream,
+		float InnerClearance,
+		float OuterClearance,
+		FVector& OutLocation) const;
+
+	UFUNCTION(BlueprintPure, Category = "Arena Floor Collision")
+	bool IsWalkableFloorLocation(const FVector& Location, float Clearance = 0.0f) const;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void OnConstruction(const FTransform& Transform) override;
@@ -24,25 +47,34 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Arena Floor Collision|Components")
 	TObjectPtr<USceneComponent> SceneRoot;
 
+	/** Retained for compatibility with existing Blueprints. It is hidden and no longer owns collision. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Arena Floor Collision|Components")
 	TObjectPtr<UStaticMeshComponent> FloorDisc;
 
-	/** Optional source of centre and radius; avoids duplicating arena measurements. */
-	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "Arena Floor Collision|Setup")
-	TObjectPtr<AArenaCombatBounds> ArenaBounds;
-
+	/** Place this actor at the centre and floor height of the walkable outer ring. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Floor Collision|Shape",
 		meta = (ClampMin = "100.0"))
 	float FloorRadius = 3000.0f;
+
+	/** No floor collision is created inside this radius. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Floor Collision|Shape",
+		meta = (ClampMin = "0.0"))
+	float InnerHoleRadius = 650.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Floor Collision|Shape",
+		meta = (ClampMin = "12", ClampMax = "48"))
+	int32 FloorRingSegmentCount = 32;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Floor Collision|Shape",
 		meta = (ClampMin = "5.0"))
 	float FloorHalfHeight = 25.0f;
 
-	/** Shows the low-poly proxy in editor only; it is always hidden during play. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Floor Collision|Debug")
-	bool bVisibleInEditor = true;
-
 private:
-	void UpdateFloorGeometry();
+	static constexpr int32 MaxFloorRingSegments = 48;
+
+	void UpdateFloorRingGeometry();
+	void ConfigureFloorCollision(class UPrimitiveComponent& Component) const;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UBoxComponent>> FloorRingSegments;
 };

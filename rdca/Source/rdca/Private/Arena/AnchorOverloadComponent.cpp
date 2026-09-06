@@ -2,6 +2,7 @@
 
 #include "Arena/AttachSurfaceComponent.h"
 #include "Arena/AnchorSpawnManager.h"
+#include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/Pawn.h"
 #include "Materials/MaterialInterface.h"
@@ -218,6 +219,21 @@ void UAnchorOverloadComponent::TriggerOverload(
 			SpawnParameters);
 		if (SpawnedFractureActor.IsValid())
 		{
+			// The fracture is visual debris.  It must still collide with WorldStatic
+			// (so it rests on the arena floor), but it must never become a temporary
+			// obstacle that blocks or shoves the player.
+			TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents;
+			SpawnedFractureActor->GetComponents(PrimitiveComponents);
+			for (UPrimitiveComponent* PrimitiveComponent : PrimitiveComponents)
+			{
+				if (PrimitiveComponent)
+				{
+					// Chaos can restore its own physical filter as simulation starts.
+					// Debris uses one explicit channel which the player always ignores.
+					PrimitiveComponent->SetCollisionObjectType(ECC_Destructible);
+					PrimitiveComponent->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+				}
+			}
 			SpawnedFractureActor->SetLifeSpan(RecoveryDuration);
 		}
 	}
@@ -254,6 +270,8 @@ void UAnchorOverloadComponent::SetAnchorAvailable(const bool bAvailable)
 {
 	if (AnchorVisual.IsValid())
 	{
+		// The visible mesh never owns gameplay collision; Attachable Box does.
+		AnchorVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		AnchorVisual->SetVisibility(bAvailable);
 		AnchorVisual->SetHiddenInGame(!bAvailable);
 	}

@@ -1,6 +1,7 @@
 #include "Player/PhaseCrashComponent.h"
 
 #include "Arena/ArenaCombatBounds.h"
+#include "Arena/ArenaFloorCollision.h"
 #include "Arena/AttachSurfaceComponent.h"
 #include "Arena/AnchorOverloadComponent.h"
 #include "Boss/BossEncounterComponent.h"
@@ -74,6 +75,19 @@ float GetArenaAimPlaneZ(const UWorld& World, const APawn& OwnerPawn)
 	}
 	// Keeps older maps functional when they have not added Arena Combat Bounds.
 	return OwnerPawn.GetActorLocation().Z;
+}
+
+AArenaFloorCollision* FindArenaFloorCollision(UWorld* World)
+{
+	if (!World)
+	{
+		return nullptr;
+	}
+	for (TActorIterator<AArenaFloorCollision> It(World); It; ++It)
+	{
+		return *It;
+	}
+	return nullptr;
 }
 }
 
@@ -953,7 +967,9 @@ void UPhaseCrashComponent::HandleCrashImpact(
 			? TargetActor->FindComponentByClass<UCrashResponseComponent>()
 			: nullptr;
 	const ECrashCollisionResponse Response =
-		Cast<UAttachSurfaceComponent>(Hit.GetComponent())
+		Cast<UBossWeakPointComponent>(Hit.GetComponent())
+			? ECrashCollisionResponse::Rebound
+			: Cast<UAttachSurfaceComponent>(Hit.GetComponent())
 			? ECrashCollisionResponse::Attach
 			: ResponseComponent
 			? ResponseComponent->GetResponse()
@@ -974,6 +990,26 @@ void UPhaseCrashComponent::HandleCrashImpact(
 		{
 			bWeakPointDamageAppliedThisCrash = true;
 		}
+
+		// A weak point always ejects the player. Some layouts use it as a child
+		// Actor and therefore do not inherit the Boss body's Crash Response; use
+		// the component defaults as a safe fallback instead of silently blocking.
+		if (TargetActor)
+		{
+			const UCrashResponseComponent* ReboundConfig = ResponseComponent
+				? ResponseComponent
+				: GetDefault<UCrashResponseComponent>();
+			HandleReboundImpact(
+				TargetActor,
+				Hit,
+				IncomingDirection,
+				*ReboundConfig);
+		}
+		else
+		{
+			FinishCrash();
+		}
+		return;
 	}
 
 	UE_LOG(
@@ -1179,15 +1215,65 @@ void UPhaseCrashComponent::HandleReboundImpact(
 		return;
 	}
 
+	float ReboundDistance = ResponseComponent.GetReboundDistance();
+	AArenaFloorCollision* FloorCollision = FindArenaFloorCollision(GetWorld());
+	if (FloorCollision)
+	{
+		const FVector FloorCenter = FloorCollision->GetFloorCenter();
+		FVector StartFromCenter = OwnerPawn->GetActorLocation() - FloorCenter;
+		StartFromCenter.Z = 0.0f;
+		const float StartRadius = StartFromCenter.Size();
+		const FVector IntendedEnd = OwnerPawn->GetActorLocation()
+			+ ReboundDirection * ReboundDistance;
+		FVector IntendedEndFromCenter = IntendedEnd - FloorCenter;
+		IntendedEndFromCenter.Z = 0.0f;
+
+		// A Boss-body rebound must never leave the player inside the central hole.
+		// Use the arena floor as the source of truth, rather than an arbitrary
+		// per-Boss distance that stops working when the arena is resized.
+		if (IntendedEndFromCenter.Size()
+			< FloorCollision->GetInnerHoleRadius() + 300.0f)
+		{
+			FVector OutwardDirection = StartFromCenter;
+			if (!OutwardDirection.Normalize())
+			{
+				OutwardDirection = Hit.ImpactPoint - FloorCenter;
+				OutwardDirection.Z = 0.0f;
+				if (!OutwardDirection.Normalize())
+				{
+					OutwardDirection = FVector::ForwardVector;
+				}
+			}
+
+			const float SafeRadius = FMath::Min(
+				FloorCollision->GetInnerHoleRadius() + 300.0f,
+				FloorCollision->GetOuterFloorRadius() - 150.0f);
+			ReboundDirection = OutwardDirection;
+			ReboundDistance = FMath::Max(
+				ReboundDistance,
+				FMath::Max(SafeRadius - StartRadius, 0.0f));
+		}
+	}
+
 	AddTemporaryMoveIgnore(TargetActor);
 	CrashStart = OwnerPawn->GetActorLocation();
 	CrashEnd =
 		CrashStart
-		+ ReboundDirection * ResponseComponent.GetReboundDistance();
+		+ ReboundDirection * ReboundDistance;
+
+	// Boss rebound is a single diagonal ejection to the ring floor, not a
+	// horizontal movement at mouth height followed by a separate gravity fall.
+	// Other Rebound actors retain their existing generic reflected trajectory.
+	if (FloorCollision && TargetActor
+		&& TargetActor->FindComponentByClass<UBossEncounterComponent>())
+	{
+		constexpr float PlayerFloorClearance = 55.0f;
+		CrashEnd.Z = FloorCollision->GetFloorCenter().Z + PlayerFloorClearance;
+	}
 	ActiveArcHeight = 0.0f;
 	CrashElapsed = 0.0f;
 	CrashDuration = FMath::Max(
-		ResponseComponent.GetReboundDistance()
+		FVector::Dist(CrashStart, CrashEnd)
 			/ FMath::Max(ResponseComponent.GetReboundSpeed(), 1.0f),
 		MinimumFlightDuration);
 
@@ -1196,7 +1282,7 @@ void UPhaseCrashComponent::HandleReboundImpact(
 		Log,
 		TEXT("Crash rebound. Direction=%s Distance=%.1f"),
 		*ReboundDirection.ToCompactString(),
-		ResponseComponent.GetReboundDistance());
+		ReboundDistance);
 }
 
 void UPhaseCrashComponent::AddTemporaryMoveIgnore(AActor* TargetActor)

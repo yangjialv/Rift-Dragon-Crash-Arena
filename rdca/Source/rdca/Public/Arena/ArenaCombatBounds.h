@@ -10,8 +10,8 @@ class USceneComponent;
 class UStaticMeshComponent;
 
 /**
- * The gameplay walls of an arena. Ground collision intentionally belongs to
- * AArenaFloorCollision, so this actor only owns the outer and inner air walls.
+ * The gameplay outer wall of an arena. The walkable ring and central fall void
+ * intentionally belong to AArenaFloorCollision and a separate recovery volume.
  */
 UCLASS(BlueprintType, Blueprintable)
 class RDCA_API AArenaCombatBounds : public AActor

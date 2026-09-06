@@ -34,6 +34,8 @@ APlayerCorePawn::APlayerCorePawn()
 	SetRootComponent(CollisionComponent);
 	CollisionComponent->InitSphereRadius(50.0f);
 	CollisionComponent->SetCollisionProfileName(TEXT("Pawn"));
+	// Chaos debris settles against WorldStatic but must never block this Pawn.
+	CollisionComponent->SetCollisionResponseToChannel(ECC_Destructible, ECR_Ignore);
 
 	VisualMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VisualMesh"));
 	VisualMesh->SetupAttachment(CollisionComponent);
@@ -69,6 +71,9 @@ APlayerCorePawn::APlayerCorePawn()
 void APlayerCorePawn::BeginPlay()
 {
 	Super::BeginPlay();
+	// An existing Blueprint can serialize its Pawn profile, so enforce the
+	// debris exception after Blueprint defaults have been applied.
+	CollisionComponent->SetCollisionResponseToChannel(ECC_Destructible, ECR_Ignore);
 
 	MovementComponent->MaxSpeed = MoveSpeed;
 	BaseVisualScale = VisualMesh

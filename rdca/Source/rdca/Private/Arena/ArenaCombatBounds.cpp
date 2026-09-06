@@ -125,15 +125,9 @@ void AArenaCombatBounds::UpdateBoundaryGeometry()
 			FMath::RadiansToDegrees(AngleRadians) + 90.0f, 0.0f));
 	}
 
-	const int32 ActiveInnerSegments = FMath::Clamp(
-		InnerWallSegmentCount,
-		8,
-		MaxInnerWallSegments);
-	const float InnerArcLength = 2.0f * PI * InnerVoidRadius / ActiveInnerSegments;
-	const FVector InnerSegmentExtent(
-		InnerArcLength * 0.5f + 10.0f,
-		InnerWallThickness * 0.5f,
-		InnerWallHeight * 0.5f);
+	// The centre is now a real fall-through void with its own placed recovery
+	// volume. The former low inner wall would prevent a player from ever falling
+	// into it, so Combat Bounds owns only the outer air wall.
 	for (int32 Index = 0; Index < InnerWallSegments.Num(); ++Index)
 	{
 		UBoxComponent* Segment = InnerWallSegments[Index];
@@ -141,22 +135,7 @@ void AArenaCombatBounds::UpdateBoundaryGeometry()
 		{
 			continue;
 		}
-		const bool bActive = Index < ActiveInnerSegments;
-		Segment->SetCollisionEnabled(
-			bActive ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
-		if (!bActive)
-		{
-			continue;
-		}
-		const float AngleRadians = 2.0f * PI * Index / ActiveInnerSegments;
-		const FVector RadialDirection(
-			FMath::Cos(AngleRadians), FMath::Sin(AngleRadians), 0.0f);
-		Segment->SetBoxExtent(InnerSegmentExtent, false);
-		Segment->SetRelativeLocation(
-			RadialDirection * InnerVoidRadius
-			+ FVector::UpVector * (InnerWallHeight * 0.5f));
-		Segment->SetRelativeRotation(FRotator(0.0f,
-			FMath::RadiansToDegrees(AngleRadians) + 90.0f, 0.0f));
+		Segment->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
 
 	if (InnerBoundaryVisual)

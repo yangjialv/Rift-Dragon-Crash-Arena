@@ -4,7 +4,7 @@
 #include "GameFramework/Actor.h"
 #include "AnchorSpawnManager.generated.h"
 
-class AArenaCombatBounds;
+class AArenaFloorCollision;
 
 UCLASS(Blueprintable)
 class RDCA_API AAnchorSpawnManager : public AActor
@@ -45,16 +45,16 @@ protected:
 	bool bSpawnOnBeginPlay = true;
 
 	/**
-	 * Generates anchors directly in the Combat Bounds annulus instead of choosing
-	 * from manually placed AnchorSpawnPoint actors.  The manual mode remains the
-	 * default so existing layouts are unaffected until this is enabled.
+	 * Generates anchors on the walkable annulus supplied by Arena Floor Collision
+	 * instead of choosing manually placed AnchorSpawnPoint actors. The manual mode
+	 * remains the default so existing layouts are unaffected until this is enabled.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anchor Spawning|Arena Random")
 	bool bUseArenaRandomSpawns = false;
 
 	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "Anchor Spawning|Arena Random",
 		meta = (EditCondition = "bUseArenaRandomSpawns"))
-	TObjectPtr<AArenaCombatBounds> ArenaCombatBounds;
+	TObjectPtr<AArenaFloorCollision> ArenaFloorCollision;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anchor Spawning|Arena Random",
 		meta = (EditCondition = "bUseArenaRandomSpawns", ClampMin = "0.0"))
@@ -138,7 +138,7 @@ private:
 	bool ChooseBalancedArenaAnchorLocation(
 		bool bRequirePlayerReachability,
 		FVector& OutLocation);
-	AArenaCombatBounds* ResolveArenaCombatBounds();
+	AArenaFloorCollision* ResolveArenaFloorCollision();
 	bool IsAnchorLocationClear(const FVector& CandidateLocation) const;
 	float GetClosestAnchorDistanceSquared(const FVector& CandidateLocation) const;
 	bool HasReachableActiveAnchor() const;

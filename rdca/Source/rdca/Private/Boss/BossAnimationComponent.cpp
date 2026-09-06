@@ -93,6 +93,7 @@ void UBossAnimationComponent::HandleEncounterStateChanged(
 		&& NewState != EBossEncounterState::WeakPointExposed)
 	{
 		StopStunLoop();
+		bWeakPointHitDuringExposure = false;
 	}
 
 	const EBossAttackType Attack = Encounter->GetCurrentAttack();
@@ -131,6 +132,7 @@ void UBossAnimationComponent::HandleEncounterStateChanged(
 		break;
 
 	case EBossEncounterState::WeakPointExposed:
+		bWeakPointHitDuringExposure = false;
 		PlayMontage(StunMontage);
 		break;
 
@@ -159,6 +161,11 @@ void UBossAnimationComponent::HandleWeakPointCrash(
 	{
 		return;
 	}
+	// A successful hit interrupts Stun with Hit and keeps it interrupted for
+	// the remainder of this weak-point window. The encounter timer still owns
+	// when the next attack cycle begins.
+	bWeakPointHitDuringExposure = true;
+	StopStunLoop();
 	PlayMontage(HitMontage);
 }
 
@@ -331,7 +338,8 @@ void UBossAnimationComponent::TickStunLoop()
 {
 	if (!Encounter.IsValid()
 		|| Encounter->GetEncounterState() != EBossEncounterState::WeakPointExposed
-		|| !StunMontage)
+		|| !StunMontage
+		|| bWeakPointHitDuringExposure)
 	{
 		return;
 	}
