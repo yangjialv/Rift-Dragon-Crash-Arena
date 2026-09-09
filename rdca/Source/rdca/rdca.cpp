@@ -5,4 +5,4 @@
 
 DEFINE_LOG_CATEGORY(LogRDCAPlayer);
 
-IMPLEMENT_PRIMARY_GAME_MODULE( FDefaultGameModuleImpl, rdca, "rdca" );
+IMPLEMENT_PRIMARY_GAME_MODULE(FDefaultGameModuleImpl, rdca, "rdca");

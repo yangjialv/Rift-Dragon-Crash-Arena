@@ -8,6 +8,10 @@ class UBossWeakPointComponent;
 class UMaterialInterface;
 class USceneComponent;
 class UStaticMeshComponent;
+class UBoxComponent;
+class UPrimitiveComponent;
+class UProceduralMeshComponent;
+class AActor;
 class ABossFanProjectile;
 class ABossSweepLaser;
 
@@ -92,6 +96,11 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(
+		FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
+
 public:
 	UFUNCTION(BlueprintPure, Category = "Boss|Encounter")
 	EBossEncounterState GetEncounterState() const { return EncounterState; }
@@ -113,6 +122,10 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Boss|Encounter")
 	float GetStateRemainingTime() const;
+
+	/** Returns the ShockwaveVisual scale required to render a ring at TargetRadius. */
+	UFUNCTION(BlueprintPure, Category = "Boss|Encounter|Shockwave")
+	FVector GetShockwaveVisualScaleForRadius(float TargetRadius) const;
 
 	UFUNCTION(BlueprintCallable, Category = "Boss|Encounter")
 	void StopEncounter();
@@ -142,10 +155,6 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Timing",
 		meta = (ClampMin = "0.1"))
 	float WarningDuration = 1.5f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Timing",
-		meta = (ClampMin = "0.1"))
-	float ShockwaveExpansionDuration = 2.4f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Facing",
 		meta = (ClampMin = "1.0", ClampMax = "720.0"))
@@ -275,27 +284,64 @@ protected:
 	TSubclassOf<ABossSweepLaser> SweepLaserClass;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Shockwave",
+		meta = (ClampMin = "0.0", ToolTip = "Radius of the shockwave ring when its active expansion begins."))
+	float ShockwaveInitialRadius = 0.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Shockwave",
 		meta = (ClampMin = "1.0"))
 	float ShockwaveExpandedMaximumRadius = 3600.0f;
 
+	/** World units per second. The active duration is derived from the initial and maximum radii. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Shockwave",
-		meta = (ClampMin = "0.0"))
-	float GroundDamageMaximumHeight = 140.0f;
+		meta = (ClampMin = "1.0"))
+	float ShockwaveExpansionSpeed = 1500.0f;
+
+	/** Total radial gameplay width of the damaging band, rather than a per-side tolerance. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Shockwave",
+		meta = (ClampMin = "0.0", ToolTip = "Total width of the damage band in world units."))
+	float ShockwaveGameplayWidth = 120.0f;
+
+	/** Internal scalar name used by the legacy editor-only Plane previews. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Shockwave|Visual",
+		meta = (ClampMin = "0.0", ToolTip = "Visual ring width. Requires this scalar parameter in both shockwave materials."))
+	float ShockwaveVisualWidth = 120.0f;
+
+	FName ShockwaveVisualWidthParameter = TEXT("RingWidth");
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Shockwave",
+		meta = (ClampMin = "1.0", DisplayName = "Shockwave Height",
+			ToolTip = "Total height of the damaging shockwave volume. The Torus visual should use this same height."))
+	float GroundDamageMaximumHeight = 140.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, AdvancedDisplay, Category = "Boss|Encounter|Shockwave|Collision",
+		meta = (ClampMin = "8", ClampMax = "48",
+			ToolTip = "Number of low-cost overlap segments used to form the circular shockwave collision band."))
+	int32 ShockwaveCollisionSegmentCount = 24;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, AdvancedDisplay, Category = "Boss|Encounter|Shockwave|Collision",
 		meta = (ClampMin = "0.0",
-			ToolTip = "Gameplay thickness added around the expanding shockwave radius to avoid frame-step misses."))
-	float ShockwaveHitTolerance = 60.0f;
+			ToolTip = "Small world-space overlap between collision segments, preventing gaps as the ring expands."))
+	float ShockwaveCollisionSegmentOverlap = 20.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Shockwave",
 		meta = (ClampMin = "1"))
 	int32 ShockwaveDamage = 1;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Visual")
-	TObjectPtr<UMaterialInterface> ShockwaveWarningMaterial;
+	/** Material used by the runtime-generated fire ring during its warning. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Shockwave|Fire Visual")
+	TObjectPtr<UMaterialInterface> ShockwaveFireWarningMaterial;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Visual")
-	TObjectPtr<UMaterialInterface> ShockwaveActiveMaterial;
+	/** Material used by the runtime-generated fire ring during its damaging pass. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Shockwave|Fire Visual")
+	TObjectPtr<UMaterialInterface> ShockwaveFireActiveMaterial;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, AdvancedDisplay, Category = "Boss|Encounter|Shockwave|Fire Visual",
+		meta = (ClampMin = "12", ClampMax = "64", ToolTip = "Roundness of the generated fire ring."))
+	int32 ShockwaveVisualRadialSegments = 32;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, AdvancedDisplay, Category = "Boss|Encounter|Shockwave|Fire Visual",
+		meta = (ClampMin = "4", ClampMax = "16", ToolTip = "Roundness of the fire ring's tube cross-section."))
+	int32 ShockwaveVisualTubeSegments = 8;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Visual")
 	TObjectPtr<UMaterialInterface> WeakPointProtectedMaterial;
@@ -317,7 +363,27 @@ private:
 	void BeginCurrentAttack();
 	void FinishCurrentAttack();
 	void UpdateShockwave(float NormalizedTime);
-	void TryDamagePlayer(float PreviousRadius, float CurrentRadius);
+	float GetShockwaveExpansionDuration() const;
+	void SetShockwaveVisualRadius(float Radius);
+	void ApplyShockwaveVisualWidth(UStaticMeshComponent* Mesh, float Radius);
+	void UpdateShockwaveEditorPreviewScales();
+	void CreateShockwaveProceduralVisual();
+	void UpdateShockwaveProceduralVisual(float ConfiguredRadius);
+	void SetShockwaveProceduralVisualVisible(bool bVisible);
+	void SetShockwaveProceduralVisualMaterial(UMaterialInterface* Material);
+	void CreateShockwaveCollisionSegments();
+	void UpdateShockwaveCollisionSegments(float RingCenterRadius);
+	void SetShockwaveCollisionEnabled(bool bEnabled);
+	void ApplyShockwaveOverlapDamage(AActor* OtherActor);
+
+	UFUNCTION()
+	void HandleShockwaveSegmentOverlap(
+		UPrimitiveComponent* OverlappedComponent,
+		AActor* OtherActor,
+		UPrimitiveComponent* OtherComponent,
+		int32 OtherBodyIndex,
+		bool bFromSweep,
+		const FHitResult& SweepResult);
 	void UpdateWeakPointVisual(bool bExposed);
 	float GetCurrentStateDuration() const;
 	void TickAimedVolley(float DeltaTime);
@@ -342,8 +408,16 @@ private:
 	TWeakObjectPtr<USceneComponent> LaserOrigin;
 	TWeakObjectPtr<USceneComponent> ShockwaveOrigin;
 	TWeakObjectPtr<USceneComponent> WeakPointOrigin;
+	UPROPERTY(Transient)
+	TObjectPtr<UProceduralMeshComponent> ShockwaveProceduralVisual;
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UBoxComponent>> ShockwaveCollisionSegments;
 	FVector ShockwaveBaseScale = FVector::OneVector;
 	float ShockwaveBaseWorldRadius = 50.0f;
+	float ShockwaveWorldUnitsPerConfiguredUnit = 1.0f;
+	bool bShockwaveProceduralMeshBuilt = false;
+	int32 BuiltShockwaveVisualRadialSegments = 0;
+	int32 BuiltShockwaveVisualTubeSegments = 0;
 	EBossEncounterState EncounterState = EBossEncounterState::Idle;
 	EBossCombatPhase CombatPhase = EBossCombatPhase::Phase1;
 	EBossAttackType CurrentAttack = EBossAttackType::None;

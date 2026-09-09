@@ -3,16 +3,41 @@
 #include "Boss/BossWeakPointComponent.h"
 #include "Boss/BossFanProjectile.h"
 #include "Boss/BossSweepLaser.h"
+#include "Components/BoxComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "EngineUtils.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Player/PhaseCrashComponent.h"
 #include "Player/PlayerHealthComponent.h"
+#include "ProceduralMeshComponent.h"
 #include "rdca.h"
+
+#if WITH_EDITOR
+#include "UObject/UnrealType.h"
+#endif
+
+namespace
+{
+float GetVisualWorldRadius(UStaticMeshComponent* Visual)
+{
+	if (!Visual)
+	{
+		return 0.0f;
+	}
+
+	Visual->UpdateBounds();
+	return FMath::Max(
+		Visual->Bounds.BoxExtent.X,
+		Visual->Bounds.BoxExtent.Y);
+}
+}
 
 UBossEncounterComponent::UBossEncounterComponent()
 {
@@ -97,6 +122,10 @@ void UBossEncounterComponent::BeginPlay()
 	LaserOrigin = FindNamedSceneComponent(TEXT("LaserOrigin"));
 	ShockwaveOrigin = FindNamedSceneComponent(TEXT("ShockwaveOrigin"));
 	WeakPointOrigin = FindNamedSceneComponent(TEXT("WeakPointOrigin"));
+	if (ShockwaveOrigin.IsValid())
+	{
+		ShockwaveOrigin->SetMobility(EComponentMobility::Movable);
+	}
 	TArray<UStaticMeshComponent*> MeshComponents;
 	GetOwner()->GetComponents<UStaticMeshComponent>(MeshComponents);
 	for (UStaticMeshComponent* Mesh : MeshComponents)
@@ -104,15 +133,24 @@ void UBossEncounterComponent::BeginPlay()
 		if (Mesh->GetName().Equals(TEXT("ShockwaveVisual"), ESearchCase::IgnoreCase))
 		{
 			ShockwaveVisual = Mesh;
+			Mesh->SetMobility(EComponentMobility::Movable);
 			ShockwaveBaseScale = Mesh->GetRelativeScale3D();
-			Mesh->UpdateBounds();
+			// The Blueprint Construction Script already calibrates this component
+			// to the configured initial radius. Preserve that authored scale as the
+			// runtime reference instead of deriving a new reference from mesh bounds.
 			ShockwaveBaseWorldRadius = FMath::Max(
-				Mesh->Bounds.BoxExtent.X,
-				Mesh->Bounds.BoxExtent.Y);
-			ShockwaveBaseWorldRadius = FMath::Max(
-				ShockwaveBaseWorldRadius,
+				FMath::Min(ShockwaveInitialRadius, ShockwaveExpandedMaximumRadius),
 				1.0f);
 			Mesh->SetVisibility(false);
+			UE_LOG(
+				LogRDCAPlayer,
+				Warning,
+				TEXT("Shockwave visual resolved. Component=%s Mesh=%s InitialScale=%s ReferenceRadius=%.1f Mobility=%d"),
+				*GetNameSafe(Mesh),
+				*GetNameSafe(Mesh->GetStaticMesh()),
+				*ShockwaveBaseScale.ToString(),
+				ShockwaveBaseWorldRadius,
+				static_cast<int32>(Mesh->Mobility));
 		}
 		else if (Mesh->GetName().Equals(TEXT("WeakPoint"), ESearchCase::IgnoreCase))
 		{
@@ -148,6 +186,8 @@ void UBossEncounterComponent::BeginPlay()
 			WeakPoint.IsValid() ? TEXT("found") : TEXT("missing"),
 			ShockwaveVisual.IsValid() ? TEXT("found") : TEXT("missing"));
 	}
+	CreateShockwaveProceduralVisual();
+	CreateShockwaveCollisionSegments();
 
 	ActiveAttackRandomSeed =
 		AttackSelectionRandomSeed >= 0
@@ -156,6 +196,15 @@ void UBossEncounterComponent::BeginPlay()
 	AttackRandomStream.Initialize(ActiveAttackRandomSeed);
 	SetEncounterState(EBossEncounterState::Idle);
 }
+
+#if WITH_EDITOR
+void UBossEncounterComponent::PostEditChangeProperty(
+	FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+	UpdateShockwaveEditorPreviewScales();
+}
+#endif
 
 void UBossEncounterComponent::TickComponent(
 	const float DeltaTime,
@@ -209,7 +258,7 @@ void UBossEncounterComponent::TickComponent(
 		if (CurrentAttack == EBossAttackType::Shockwave)
 		{
 			UpdateShockwave(FMath::Clamp(
-				StateElapsed / FMath::Max(ShockwaveExpansionDuration, 0.1f),
+				StateElapsed / GetShockwaveExpansionDuration(),
 				0.0f,
 				1.0f));
 		}
@@ -264,6 +313,7 @@ void UBossEncounterComponent::TickComponent(
 	default:
 		break;
 	}
+
 }
 
 void UBossEncounterComponent::SetIntroHold(const bool bHold)
@@ -503,11 +553,7 @@ EPlayerSpatialState UBossEncounterComponent::ObservePlayerSpatialState() const
 		}
 	}
 
-	const float FloorZ = GetShockwaveOriginLocation().Z;
-	return FMath::Abs(PlayerPawn->GetActorLocation().Z - FloorZ)
-			> GroundDamageMaximumHeight
-		? EPlayerSpatialState::Airborne
-		: EPlayerSpatialState::Grounded;
+	return EPlayerSpatialState::Grounded;
 }
 
 const FBossAttackWeights& UBossEncounterComponent::GetWeightsForPlayerState(
@@ -558,7 +604,7 @@ float UBossEncounterComponent::GetCurrentAttackActiveDuration() const
 		return LaserActiveSweepDuration;
 	case EBossAttackType::Shockwave:
 	default:
-		return ShockwaveExpansionDuration;
+		return GetShockwaveExpansionDuration();
 	}
 }
 
@@ -567,13 +613,35 @@ void UBossEncounterComponent::BeginCurrentAttackWarning()
 	if (ShockwaveVisual.IsValid())
 	{
 		const bool bShockwave = CurrentAttack == EBossAttackType::Shockwave;
-		ShockwaveVisual->SetVisibility(bShockwave);
+		// The legacy Plane remains the authored radius reference and editor
+		// preview. During play the generated Torus is the actual visible Wave.
+		ShockwaveVisual->SetVisibility(
+			bShockwave && !ShockwaveProceduralVisual);
+		SetShockwaveProceduralVisualVisible(bShockwave);
 		if (bShockwave)
 		{
-			ShockwaveVisual->SetRelativeScale3D(ShockwaveBaseScale);
-			if (ShockwaveWarningMaterial)
+			// The visual is the authoritative representation of this attack.  Lock its
+			// center to the emitter at warning start; later damage queries read this
+			// same component location, so animation movement cannot split the damage
+			// circle from the displayed ring.
+			if (ShockwaveOrigin.IsValid())
 			{
-				ShockwaveVisual->SetMaterial(0, ShockwaveWarningMaterial);
+				ShockwaveVisual->SetWorldLocation(
+					ShockwaveOrigin->GetComponentLocation());
+			}
+			SetShockwaveVisualRadius(FMath::Min(
+				ShockwaveInitialRadius,
+				ShockwaveExpandedMaximumRadius));
+			const float InitialConfiguredRadius = FMath::Max(
+				FMath::Min(ShockwaveInitialRadius, ShockwaveExpandedMaximumRadius),
+				1.0f);
+			ShockwaveWorldUnitsPerConfiguredUnit = FMath::Max(
+				GetVisualWorldRadius(ShockwaveVisual.Get()) / InitialConfiguredRadius,
+				0.001f);
+			UpdateShockwaveProceduralVisual(InitialConfiguredRadius);
+			if (ShockwaveProceduralVisual)
+			{
+				SetShockwaveProceduralVisualMaterial(ShockwaveFireWarningMaterial);
 			}
 		}
 	}
@@ -595,12 +663,37 @@ void UBossEncounterComponent::BeginCurrentAttack()
 	switch (CurrentAttack)
 	{
 	case EBossAttackType::Shockwave:
-		PreviousShockwaveRadius = 0.0f;
+		PreviousShockwaveRadius = FMath::Min(
+			ShockwaveInitialRadius,
+			ShockwaveExpandedMaximumRadius);
 		bPlayerDamagedThisAttack = false;
-		if (ShockwaveVisual.IsValid() && ShockwaveActiveMaterial)
+		if (ShockwaveProceduralVisual)
 		{
-			ShockwaveVisual->SetMaterial(0, ShockwaveActiveMaterial);
+			SetShockwaveProceduralVisualMaterial(ShockwaveFireActiveMaterial);
 		}
+		UE_LOG(
+			LogRDCAPlayer,
+			Warning,
+			TEXT("Shockwave started. Initial=%.1f Maximum=%.1f Speed=%.1f Duration=%.2f VisualRadius=%.1f VisualScale=%s PlayerDistance=%.1f"),
+			ShockwaveInitialRadius,
+			ShockwaveExpandedMaximumRadius,
+			ShockwaveExpansionSpeed,
+			GetShockwaveExpansionDuration(),
+			GetVisualWorldRadius(ShockwaveVisual.Get()),
+			ShockwaveVisual.IsValid()
+				? *ShockwaveVisual->GetRelativeScale3D().ToString()
+				: TEXT("Missing"),
+			UGameplayStatics::GetPlayerPawn(GetWorld(), 0)
+				? FVector::Dist2D(
+					UGameplayStatics::GetPlayerPawn(GetWorld(), 0)->GetActorLocation(),
+					ShockwaveVisual.IsValid()
+						? ShockwaveVisual->GetComponentLocation()
+						: GetShockwaveOriginLocation())
+				: -1.0f);
+		UpdateShockwaveCollisionSegments(
+			FMath::Min(ShockwaveInitialRadius, ShockwaveExpandedMaximumRadius)
+				* ShockwaveWorldUnitsPerConfiguredUnit);
+		SetShockwaveCollisionEnabled(true);
 		break;
 	case EBossAttackType::AimedVolley:
 		AimedVolleyShotsFired = 0;
@@ -629,6 +722,8 @@ void UBossEncounterComponent::BeginCurrentAttack()
 
 void UBossEncounterComponent::FinishCurrentAttack()
 {
+	SetShockwaveCollisionEnabled(false);
+	SetShockwaveProceduralVisualVisible(false);
 	if (ShockwaveVisual.IsValid())
 	{
 		ShockwaveVisual->SetVisibility(false);
@@ -1077,65 +1172,498 @@ void UBossEncounterComponent::SpawnFanBarrageProjectile(
 
 void UBossEncounterComponent::UpdateShockwave(const float NormalizedTime)
 {
-	const float CurrentRadius = ShockwaveExpandedMaximumRadius * NormalizedTime;
-	if (ShockwaveVisual.IsValid())
+	const float InitialRadius = FMath::Min(
+		ShockwaveInitialRadius,
+		ShockwaveExpandedMaximumRadius);
+	const float CurrentRadius = FMath::Lerp(
+		InitialRadius,
+		ShockwaveExpandedMaximumRadius,
+		FMath::Clamp(NormalizedTime, 0.0f, 1.0f));
+	SetShockwaveVisualRadius(CurrentRadius);
+	UpdateShockwaveProceduralVisual(CurrentRadius);
+	const float CurrentGameplayRadius = FMath::Max(
+		CurrentRadius * ShockwaveWorldUnitsPerConfiguredUnit,
+		1.0f);
+	const float HalfwayRadius = (InitialRadius + ShockwaveExpandedMaximumRadius) * 0.5f;
+	if (PreviousShockwaveRadius < HalfwayRadius && CurrentRadius >= HalfwayRadius)
 	{
-		const float RadiusScale = FMath::Max(
-			CurrentRadius / FMath::Max(ShockwaveBaseWorldRadius, 1.0f),
-			0.01f);
-		ShockwaveVisual->SetRelativeScale3D(
-			FVector(
-				ShockwaveBaseScale.X * RadiusScale,
-				ShockwaveBaseScale.Y * RadiusScale,
-				ShockwaveBaseScale.Z));
+		UE_LOG(
+			LogRDCAPlayer,
+			Warning,
+			TEXT("Shockwave halfway. Radius=%.1f Scale=%s"),
+			CurrentRadius,
+			ShockwaveVisual.IsValid()
+				? *ShockwaveVisual->GetRelativeScale3D().ToString()
+				: TEXT("Missing"));
 	}
-	TryDamagePlayer(PreviousShockwaveRadius, CurrentRadius);
+	UpdateShockwaveCollisionSegments(CurrentGameplayRadius);
 	PreviousShockwaveRadius = CurrentRadius;
 }
 
-void UBossEncounterComponent::TryDamagePlayer(
-	const float PreviousRadius,
-	const float CurrentRadius)
+FVector UBossEncounterComponent::GetShockwaveVisualScaleForRadius(
+	const float TargetRadius) const
 {
-	if (bPlayerDamagedThisAttack || !GetWorld())
+	if (!GetOwner())
+	{
+		return FVector::OneVector;
+	}
+
+	TArray<UStaticMeshComponent*> MeshComponents;
+	GetOwner()->GetComponents<UStaticMeshComponent>(MeshComponents);
+	for (const UStaticMeshComponent* MeshComponent : MeshComponents)
+	{
+		if (!MeshComponent
+			|| !MeshComponent->GetName().Equals(
+				TEXT("ShockwaveVisual"), ESearchCase::IgnoreCase)
+			|| !MeshComponent->GetStaticMesh())
+		{
+			continue;
+		}
+
+		const FVector BaseScale = MeshComponent->GetRelativeScale3D();
+		const FVector MeshExtent = MeshComponent->GetStaticMesh()->GetBounds().BoxExtent;
+		const float BaseRadius = FMath::Max(
+			MeshExtent.X * FMath::Abs(BaseScale.X),
+			MeshExtent.Y * FMath::Abs(BaseScale.Y));
+		const float RadiusScale = FMath::Max(
+			FMath::Max(TargetRadius, 1.0f) / FMath::Max(BaseRadius, 1.0f),
+			0.01f);
+		return FVector(
+			BaseScale.X * RadiusScale,
+			BaseScale.Y * RadiusScale,
+			BaseScale.Z);
+	}
+
+	return FVector::OneVector;
+}
+
+void UBossEncounterComponent::UpdateShockwaveEditorPreviewScales()
+{
+	if (!GetOwner())
+	{
+		return;
+	}
+
+	TArray<UStaticMeshComponent*> MeshComponents;
+	GetOwner()->GetComponents<UStaticMeshComponent>(MeshComponents);
+	const FVector InitialScale =
+		GetShockwaveVisualScaleForRadius(ShockwaveInitialRadius);
+	for (UStaticMeshComponent* MeshComponent : MeshComponents)
+	{
+		if (!MeshComponent)
+		{
+			continue;
+		}
+
+		if (MeshComponent->GetName().Equals(
+			TEXT("ShockwaveVisual"), ESearchCase::IgnoreCase))
+		{
+			// Keep the real visual representative of the configured start state
+			// in the Blueprint viewport; BeginPlay uses that same scale as its base.
+			MeshComponent->SetRelativeScale3D(InitialScale);
+			ApplyShockwaveVisualWidth(MeshComponent, ShockwaveInitialRadius);
+		}
+		else if (MeshComponent->GetName().Equals(
+			TEXT("SW_Preview_Initial"), ESearchCase::IgnoreCase))
+		{
+			MeshComponent->SetRelativeScale3D(InitialScale);
+			ApplyShockwaveVisualWidth(MeshComponent, ShockwaveInitialRadius);
+		}
+		else if (MeshComponent->GetName().Equals(
+			TEXT("SW_Preview_Max"), ESearchCase::IgnoreCase))
+		{
+			MeshComponent->SetRelativeScale3D(
+				GetShockwaveVisualScaleForRadius(ShockwaveExpandedMaximumRadius));
+			ApplyShockwaveVisualWidth(
+				MeshComponent,
+				ShockwaveExpandedMaximumRadius);
+		}
+	}
+}
+
+float UBossEncounterComponent::GetShockwaveExpansionDuration() const
+{
+	return FMath::Max(
+		(ShockwaveExpandedMaximumRadius - FMath::Min(
+			ShockwaveInitialRadius,
+			ShockwaveExpandedMaximumRadius))
+			/ FMath::Max(ShockwaveExpansionSpeed, 1.0f),
+		0.01f);
+}
+
+void UBossEncounterComponent::SetShockwaveVisualRadius(const float Radius)
+{
+	if (!ShockwaveVisual.IsValid())
+	{
+		return;
+	}
+
+	const float RadiusScale = FMath::Max(
+		Radius / FMath::Max(ShockwaveBaseWorldRadius, 1.0f),
+		0.01f);
+	ShockwaveVisual->SetRelativeScale3D(
+		FVector(
+			ShockwaveBaseScale.X * RadiusScale,
+			ShockwaveBaseScale.Y * RadiusScale,
+			ShockwaveBaseScale.Z));
+	ApplyShockwaveVisualWidth(ShockwaveVisual.Get(), Radius);
+}
+
+void UBossEncounterComponent::ApplyShockwaveVisualWidth(
+	UStaticMeshComponent* Mesh,
+	const float Radius)
+{
+	if (!Mesh || ShockwaveVisualWidthParameter.IsNone())
+	{
+		return;
+	}
+
+	UMaterialInstanceDynamic* DynamicMaterial =
+		Cast<UMaterialInstanceDynamic>(Mesh->GetMaterial(0));
+	if (!DynamicMaterial)
+	{
+		DynamicMaterial = Mesh->CreateDynamicMaterialInstance(0);
+	}
+	if (!DynamicMaterial)
+	{
+		return;
+	}
+
+	// The material draws a unit-radius disc, so convert the editable world-unit
+	// width to its normalized radial width at the current ring radius.
+	DynamicMaterial->SetScalarParameterValue(
+		ShockwaveVisualWidthParameter,
+		FMath::Clamp(
+			ShockwaveVisualWidth / FMath::Max(Radius, 1.0f),
+			0.001f,
+			0.95f));
+}
+
+void UBossEncounterComponent::CreateShockwaveProceduralVisual()
+{
+	if (ShockwaveProceduralVisual || !GetOwner()
+		|| !GetOwner()->GetRootComponent())
+	{
+		return;
+	}
+
+	ShockwaveProceduralVisual = NewObject<UProceduralMeshComponent>(
+		GetOwner(), TEXT("ShockwaveProceduralVisual"));
+	if (!ShockwaveProceduralVisual)
+	{
+		return;
+	}
+
+	ShockwaveProceduralVisual->SetupAttachment(GetOwner()->GetRootComponent());
+	ShockwaveProceduralVisual->SetMobility(EComponentMobility::Movable);
+	ShockwaveProceduralVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	ShockwaveProceduralVisual->SetGenerateOverlapEvents(false);
+	ShockwaveProceduralVisual->SetCastShadow(false);
+	ShockwaveProceduralVisual->SetVisibility(false);
+	ShockwaveProceduralVisual->SetHiddenInGame(true);
+	ShockwaveProceduralVisual->RegisterComponent();
+	// The Boss actor is deliberately scaled. Keep this generated world-space
+	// ring at scale 1 so its radius/width/height match the collision values.
+	ShockwaveProceduralVisual->SetWorldScale3D(FVector::OneVector);
+}
+
+void UBossEncounterComponent::UpdateShockwaveProceduralVisual(
+	const float ConfiguredRadius)
+{
+	if (!ShockwaveProceduralVisual)
+	{
+		return;
+	}
+
+	const int32 RadialSegments = FMath::Clamp(
+		ShockwaveVisualRadialSegments, 12, 64);
+	const int32 TubeSegments = FMath::Clamp(
+		ShockwaveVisualTubeSegments, 4, 16);
+	if (bShockwaveProceduralMeshBuilt
+		&& (BuiltShockwaveVisualRadialSegments != RadialSegments
+			|| BuiltShockwaveVisualTubeSegments != TubeSegments))
+	{
+		ShockwaveProceduralVisual->ClearAllMeshSections();
+		bShockwaveProceduralMeshBuilt = false;
+	}
+
+	const float WorldUnitScale = FMath::Max(
+		ShockwaveWorldUnitsPerConfiguredUnit,
+		0.001f);
+	const float RingRadius = FMath::Max(
+		ConfiguredRadius * WorldUnitScale,
+		1.0f);
+	const float HorizontalTubeRadius = FMath::Max(
+		ShockwaveVisualWidth * WorldUnitScale * 0.5f,
+		1.0f);
+	const float VerticalTubeRadius = FMath::Max(
+		GroundDamageMaximumHeight * WorldUnitScale * 0.5f,
+		1.0f);
+	const FVector RingCenter = ShockwaveVisual.IsValid()
+		? ShockwaveVisual->GetComponentLocation()
+		: GetShockwaveOriginLocation();
+	ShockwaveProceduralVisual->SetWorldLocation(RingCenter);
+
+	const int32 VertexCount = RadialSegments * TubeSegments;
+	TArray<FVector> Vertices;
+	TArray<FVector> Normals;
+	TArray<FVector2D> UVs;
+	TArray<FColor> VertexColors;
+	TArray<FProcMeshTangent> Tangents;
+	Vertices.Reserve(VertexCount);
+	Normals.Reserve(VertexCount);
+	UVs.Reserve(VertexCount);
+	VertexColors.Reserve(VertexCount);
+	Tangents.Reserve(VertexCount);
+
+	for (int32 RadialIndex = 0; RadialIndex < RadialSegments; ++RadialIndex)
+	{
+		const float Theta = 2.0f * PI * RadialIndex / RadialSegments;
+		const FVector RadialDirection(
+			FMath::Cos(Theta), FMath::Sin(Theta), 0.0f);
+		const FVector AroundRingTangent(
+			-FMath::Sin(Theta), FMath::Cos(Theta), 0.0f);
+
+		for (int32 TubeIndex = 0; TubeIndex < TubeSegments; ++TubeIndex)
+		{
+			const float Phi = 2.0f * PI * TubeIndex / TubeSegments;
+			const float CosPhi = FMath::Cos(Phi);
+			const float SinPhi = FMath::Sin(Phi);
+			Vertices.Add(
+				RadialDirection * (RingRadius + HorizontalTubeRadius * CosPhi)
+				+ FVector::UpVector * (VerticalTubeRadius * SinPhi));
+			Normals.Add((
+				RadialDirection * (CosPhi / HorizontalTubeRadius)
+				+ FVector::UpVector * (SinPhi / VerticalTubeRadius)).GetSafeNormal());
+			UVs.Add(FVector2D(
+				static_cast<float>(RadialIndex) / RadialSegments,
+				static_cast<float>(TubeIndex) / TubeSegments));
+			VertexColors.Add(FColor::White);
+			Tangents.Add(FProcMeshTangent(AroundRingTangent, false));
+		}
+	}
+
+	if (!bShockwaveProceduralMeshBuilt)
+	{
+		TArray<int32> Triangles;
+		Triangles.Reserve(RadialSegments * TubeSegments * 6);
+		for (int32 RadialIndex = 0; RadialIndex < RadialSegments; ++RadialIndex)
+		{
+			const int32 NextRadialIndex = (RadialIndex + 1) % RadialSegments;
+			for (int32 TubeIndex = 0; TubeIndex < TubeSegments; ++TubeIndex)
+			{
+				const int32 NextTubeIndex = (TubeIndex + 1) % TubeSegments;
+				const int32 A = RadialIndex * TubeSegments + TubeIndex;
+				const int32 B = NextRadialIndex * TubeSegments + TubeIndex;
+				const int32 C = NextRadialIndex * TubeSegments + NextTubeIndex;
+				const int32 D = RadialIndex * TubeSegments + NextTubeIndex;
+				// ProceduralMeshComponent expects UE's clockwise front-face winding.
+				// Keeping the generated surface outward-facing is important because
+				// the fire material deliberately culls the inward half of the ring.
+				Triangles.Add(A);
+				Triangles.Add(C);
+				Triangles.Add(B);
+				Triangles.Add(A);
+				Triangles.Add(D);
+				Triangles.Add(C);
+			}
+		}
+		ShockwaveProceduralVisual->CreateMeshSection(
+			0, Vertices, Triangles, Normals, UVs, VertexColors, Tangents, false);
+		bShockwaveProceduralMeshBuilt = true;
+		BuiltShockwaveVisualRadialSegments = RadialSegments;
+		BuiltShockwaveVisualTubeSegments = TubeSegments;
+	}
+	else
+	{
+		ShockwaveProceduralVisual->UpdateMeshSection(
+			0, Vertices, Normals, UVs, VertexColors, Tangents);
+	}
+}
+
+void UBossEncounterComponent::SetShockwaveProceduralVisualVisible(
+	const bool bVisible)
+{
+	if (ShockwaveProceduralVisual)
+	{
+		ShockwaveProceduralVisual->SetVisibility(bVisible);
+		ShockwaveProceduralVisual->SetHiddenInGame(!bVisible);
+	}
+}
+
+void UBossEncounterComponent::SetShockwaveProceduralVisualMaterial(
+	UMaterialInterface* Material)
+{
+	if (ShockwaveProceduralVisual && Material)
+	{
+		ShockwaveProceduralVisual->SetMaterial(0, Material);
+	}
+}
+
+void UBossEncounterComponent::CreateShockwaveCollisionSegments()
+{
+	if (!GetOwner() || !GetOwner()->GetRootComponent()
+		|| !ShockwaveCollisionSegments.IsEmpty())
+	{
+		return;
+	}
+
+	const int32 SegmentCount = FMath::Clamp(ShockwaveCollisionSegmentCount, 8, 48);
+	ShockwaveCollisionSegments.Reserve(SegmentCount);
+	for (int32 Index = 0; Index < SegmentCount; ++Index)
+	{
+		const FName SegmentName(*FString::Printf(
+			TEXT("ShockwaveCollisionSegment_%02d"), Index));
+		UBoxComponent* Segment = NewObject<UBoxComponent>(GetOwner(), SegmentName);
+		if (!Segment)
+		{
+			continue;
+		}
+
+		Segment->SetupAttachment(GetOwner()->GetRootComponent());
+		Segment->SetMobility(EComponentMobility::Movable);
+		Segment->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Segment->SetCollisionObjectType(ECC_WorldDynamic);
+		Segment->SetCollisionResponseToAllChannels(ECR_Ignore);
+		Segment->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+		Segment->SetGenerateOverlapEvents(true);
+		Segment->SetHiddenInGame(true);
+		Segment->OnComponentBeginOverlap.AddDynamic(
+			this, &UBossEncounterComponent::HandleShockwaveSegmentOverlap);
+		Segment->RegisterComponent();
+		Segment->SetWorldScale3D(FVector::OneVector);
+		ShockwaveCollisionSegments.Add(Segment);
+	}
+}
+
+void UBossEncounterComponent::UpdateShockwaveCollisionSegments(
+	const float RingCenterRadius)
+{
+	if (!ShockwaveVisual.IsValid())
+	{
+		return;
+	}
+	if (ShockwaveCollisionSegments.IsEmpty())
+	{
+		CreateShockwaveCollisionSegments();
+	}
+	if (ShockwaveCollisionSegments.IsEmpty())
+	{
+		return;
+	}
+
+	// RingCenterRadius is generated from the same configured radius as the
+	// procedural Torus. Width and height deliberately stay independent of it.
+	const float WorldUnitScale = FMath::Max(
+		ShockwaveWorldUnitsPerConfiguredUnit,
+		0.001f);
+	const float GameplayWidth = FMath::Max(
+		ShockwaveGameplayWidth * WorldUnitScale,
+		1.0f);
+	const float CollisionHeight = FMath::Max(
+		GroundDamageMaximumHeight * WorldUnitScale,
+		1.0f);
+	const float RingRadius = FMath::Max(
+		RingCenterRadius,
+		GameplayWidth * 0.5f);
+	const int32 SegmentCount = ShockwaveCollisionSegments.Num();
+	const float ArcLength = (2.0f * PI * RingRadius) / SegmentCount;
+	const FVector BoxExtent(
+		GameplayWidth * 0.5f + ShockwaveCollisionSegmentOverlap,
+		ArcLength * 0.5f + ShockwaveCollisionSegmentOverlap,
+		CollisionHeight * 0.5f);
+	const FVector RingCenter = ShockwaveVisual->GetComponentLocation();
+
+	for (int32 Index = 0; Index < SegmentCount; ++Index)
+	{
+		UBoxComponent* Segment = ShockwaveCollisionSegments[Index];
+		if (!Segment)
+		{
+			continue;
+		}
+
+		const float AngleDegrees = 360.0f * Index / SegmentCount;
+		const FVector RadialDirection = FVector(
+			FMath::Cos(FMath::DegreesToRadians(AngleDegrees)),
+			FMath::Sin(FMath::DegreesToRadians(AngleDegrees)),
+			0.0f);
+		Segment->SetBoxExtent(BoxExtent, false);
+		Segment->SetWorldLocationAndRotation(
+			RingCenter + RadialDirection * RingRadius,
+			FRotator(0.0f, AngleDegrees, 0.0f),
+			false,
+			nullptr,
+			ETeleportType::TeleportPhysics);
+		Segment->UpdateOverlaps();
+	}
+}
+
+void UBossEncounterComponent::SetShockwaveCollisionEnabled(const bool bEnabled)
+{
+	for (UBoxComponent* Segment : ShockwaveCollisionSegments)
+	{
+		if (Segment)
+		{
+			Segment->SetCollisionEnabled(
+				bEnabled
+					? ECollisionEnabled::QueryOnly
+					: ECollisionEnabled::NoCollision);
+			if (bEnabled)
+			{
+				// Enabling QueryOnly does not always emit an initial overlap for an
+				// already-overlapping Pawn, so explicitly refresh it once here.
+				Segment->UpdateOverlaps();
+			}
+		}
+	}
+}
+
+void UBossEncounterComponent::HandleShockwaveSegmentOverlap(
+	UPrimitiveComponent* OverlappedComponent,
+	AActor* OtherActor,
+	UPrimitiveComponent* OtherComponent,
+	const int32 OtherBodyIndex,
+	const bool bFromSweep,
+	const FHitResult& SweepResult)
+{
+	ApplyShockwaveOverlapDamage(OtherActor);
+}
+
+void UBossEncounterComponent::ApplyShockwaveOverlapDamage(AActor* OtherActor)
+{
+	if (bPlayerDamagedThisAttack || CurrentAttack != EBossAttackType::Shockwave
+		|| EncounterState != EBossEncounterState::Attacking || !GetWorld())
 	{
 		return;
 	}
 
 	APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-	if (!PlayerPawn)
+	if (!PlayerPawn || OtherActor != PlayerPawn)
 	{
 		return;
 	}
 
-	const FVector ShockwaveCenter = GetShockwaveOriginLocation();
-	const FVector FromBoss = PlayerPawn->GetActorLocation() - ShockwaveCenter;
-	const float HorizontalDistance = FVector(FromBoss.X, FromBoss.Y, 0.0f).Size();
-	const float ShockwaveFloorZ = ShockwaveCenter.Z;
-	const float HeightAboveShockwave =
-		PlayerPawn->GetActorLocation().Z - ShockwaveFloorZ;
-	const bool bWaveReachedPlayer =
-		HorizontalDistance + ShockwaveHitTolerance >= PreviousRadius
-		&& HorizontalDistance - ShockwaveHitTolerance <= CurrentRadius;
-	const bool bPlayerIsGroundedEnough =
-		FMath::Abs(HeightAboveShockwave) <= GroundDamageMaximumHeight;
-	if (bWaveReachedPlayer && bPlayerIsGroundedEnough)
+	if (const UPhaseCrashComponent* PhaseCrash =
+			PlayerPawn->FindComponentByClass<UPhaseCrashComponent>())
 	{
-		if (UPlayerHealthComponent* Health =
-				PlayerPawn->FindComponentByClass<UPlayerHealthComponent>())
+		if (PhaseCrash->IsCrashing() || PhaseCrash->IsAttached())
 		{
-			bPlayerDamagedThisAttack = Health->ReceiveDamage(ShockwaveDamage);
-			if (bPlayerDamagedThisAttack)
-			{
-				UE_LOG(
-					LogRDCAPlayer,
-					Log,
-					TEXT("Boss shockwave hit. Player=%s Radius=%.1f Distance=%.1f Height=%.1f"),
-					*GetNameSafe(PlayerPawn),
-					CurrentRadius,
-					HorizontalDistance,
-					HeightAboveShockwave);
-			}
+			return;
+		}
+	}
+
+	if (UPlayerHealthComponent* Health =
+		PlayerPawn->FindComponentByClass<UPlayerHealthComponent>())
+	{
+		bPlayerDamagedThisAttack = Health->ReceiveDamage(ShockwaveDamage);
+		if (bPlayerDamagedThisAttack)
+		{
+			SetShockwaveCollisionEnabled(false);
+			UE_LOG(
+				LogRDCAPlayer,
+				Log,
+				TEXT("Boss shockwave overlap hit. Player=%s"),
+				*GetNameSafe(PlayerPawn));
 		}
 	}
 }

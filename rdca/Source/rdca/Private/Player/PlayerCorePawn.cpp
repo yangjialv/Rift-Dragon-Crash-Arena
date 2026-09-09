@@ -7,6 +7,7 @@
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/MeshComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
@@ -87,6 +88,11 @@ void APlayerCorePawn::BeginPlay()
 		: FRotator::ZeroRotator;
 	if (VisualMesh)
 	{
+		// material_dynamic (or whichever material occupies slot 0 in the
+		// Blueprint) becomes a per-player instance. This does not replace the
+		// authored material; it only allows the slime state to drive its WPO.
+		SlimeMaterialInstance = VisualMesh->CreateDynamicMaterialInstance(0);
+
 		FVector LocalBoundsMin;
 		FVector LocalBoundsMax;
 		VisualMesh->GetLocalBounds(LocalBoundsMin, LocalBoundsMax);
@@ -200,9 +206,11 @@ void APlayerCorePawn::UpdateSlimePresentation(const float DeltaTime)
 	FVector ShapeMultiplier = FVector::OneVector;
 	float PitchTilt = 0.0f;
 	float BackwardVisualOffset = 0.0f;
+	float SurfacePressOffset = 0.0f;
 	FVector DesiredUp = FVector::UpVector;
 	FVector DesiredFacing = LastFacingDirection;
 	FVector HorizontalVelocity(FrameVelocity.X, FrameVelocity.Y, 0.0f);
+	const float HorizontalSpeed = HorizontalVelocity.Size();
 	if (HorizontalVelocity.Normalize())
 	{
 		DesiredFacing = HorizontalVelocity;
@@ -212,20 +220,48 @@ void APlayerCorePawn::UpdateSlimePresentation(const float DeltaTime)
 	{
 	case EPlayerSlimeState::Idle:
 	{
-		const float Pulse = FMath::Sin(PresentationTime * 3.0f) * 0.018f;
+		const float PrimaryPulse = FMath::Sin(
+			PresentationTime * IdlePulseFrequency * 2.0f * PI)
+			* IdlePulseAmount;
+		const float SecondaryPulse = FMath::Sin(
+			PresentationTime * IdlePulseFrequency * 4.3f * PI + 0.7f)
+			* IdlePulseAmount * 0.32f;
 		ShapeMultiplier = FVector(
-			1.16f + Pulse,
-			1.16f + Pulse,
-			0.72f - Pulse);
+			1.16f + PrimaryPulse * 0.45f + SecondaryPulse,
+			1.16f + PrimaryPulse - SecondaryPulse,
+			0.72f - PrimaryPulse * 0.82f);
 		break;
 	}
 	case EPlayerSlimeState::Moving:
+	{
 		// The leading side is compressed while the liquid mass visually lags
-		// behind the collision body. Dash is the state that stretches forward.
-		ShapeMultiplier = FVector(0.84f, 1.10f, 0.78f);
-		BackwardVisualOffset = MovementTrailOffset;
-		PitchTilt = 6.0f;
+		// behind the collision body. Each compression/recovery cycle makes the
+		// low-speed glide read as liquid motion instead of a static pose.
+		const float MoveAlpha = FMath::Clamp(
+			HorizontalSpeed / FMath::Max(MoveSpeed, 1.0f),
+			0.0f,
+			1.0f);
+		const float CrawlFrequency = FMath::Lerp(
+			LocomotionMinFrequency,
+			LocomotionMaxFrequency,
+			MoveAlpha);
+		LocomotionPhase += DeltaTime * CrawlFrequency * 2.0f * PI;
+		const float CrawlWave = FMath::Sin(LocomotionPhase);
+		const float CompressionAlpha = (CrawlWave + 1.0f) * 0.5f;
+		const float Squirm = LocomotionSquirmAmount * MoveAlpha;
+		ShapeMultiplier = FVector(
+			FMath::Lerp(0.94f, 0.84f, MoveAlpha)
+				- CompressionAlpha * Squirm,
+			FMath::Lerp(1.07f, 1.12f, MoveAlpha)
+				+ CompressionAlpha * Squirm * 0.52f,
+			FMath::Lerp(0.80f, 0.75f, MoveAlpha)
+				- CompressionAlpha * Squirm * 0.58f);
+		BackwardVisualOffset = MovementTrailOffset * MoveAlpha
+			* FMath::Lerp(0.65f, 1.15f, CompressionAlpha);
+		SurfacePressOffset = LocomotionPressOffset * MoveAlpha * CompressionAlpha;
+		PitchTilt = 4.0f + CrawlWave * 1.8f;
 		break;
+	}
 	case EPlayerSlimeState::Charging:
 	{
 		const float Charge = PhaseCrashComponent->GetChargeAlpha();
@@ -336,12 +372,25 @@ void APlayerCorePawn::UpdateSlimePresentation(const float DeltaTime)
 			1.0f);
 		const float SuctionPulse =
 			FMath::Sin(SlimeStateElapsed * 5.0f) * 0.015f;
+		const float CrawlFrequency = FMath::Lerp(
+			LocomotionMinFrequency,
+			LocomotionMaxFrequency,
+			MoveAlpha);
+		LocomotionPhase += DeltaTime * CrawlFrequency * 2.0f * PI;
+		const float CompressionAlpha =
+			(FMath::Sin(LocomotionPhase) + 1.0f) * 0.5f;
+		const float SurfaceSquirm = LocomotionSquirmAmount * MoveAlpha;
 		ShapeMultiplier = FVector(
 			FMath::Lerp(1.18f, 0.88f, MoveAlpha)
+				- CompressionAlpha * SurfaceSquirm
 				+ SurfaceImpactEnergy * 0.22f + SuctionPulse,
-			1.18f + SurfaceImpactEnergy * 0.22f + SuctionPulse,
-			0.70f - SurfaceImpactEnergy * 0.18f - SuctionPulse);
-		BackwardVisualOffset = MovementTrailOffset * MoveAlpha;
+			1.18f + CompressionAlpha * SurfaceSquirm * 0.50f
+				+ SurfaceImpactEnergy * 0.22f + SuctionPulse,
+			0.70f - CompressionAlpha * SurfaceSquirm * 0.55f
+				- SurfaceImpactEnergy * 0.18f - SuctionPulse);
+		BackwardVisualOffset = MovementTrailOffset * MoveAlpha
+			* FMath::Lerp(0.65f, 1.12f, CompressionAlpha);
+		SurfacePressOffset = LocomotionPressOffset * MoveAlpha * CompressionAlpha;
 		break;
 	}
 	}
@@ -388,9 +437,11 @@ void APlayerCorePawn::UpdateSlimePresentation(const float DeltaTime)
 	const FVector DesiredWorldLocation =
 		CollisionComponent->GetComponentTransform().TransformPosition(BaseVisualLocation)
 		- LastFacingDirection * BackwardVisualOffset
-		- DesiredUp * (SlimeState == EPlayerSlimeState::Attached
-			? BaseVisualBottomDistance * (1.0f - ShapeMultiplier.Z)
-			: 0.0f);
+		- DesiredUp * (
+			(SlimeState == EPlayerSlimeState::Attached
+				? BaseVisualBottomDistance * (1.0f - ShapeMultiplier.Z)
+				: 0.0f)
+			+ SurfacePressOffset);
 	VisualMesh->SetWorldLocation(FMath::VInterpTo(
 		VisualMesh->GetComponentLocation(),
 		DesiredWorldLocation,
@@ -432,6 +483,86 @@ void APlayerCorePawn::UpdateSlimePresentation(const float DeltaTime)
 		DesiredRotation,
 		DeltaTime,
 		SlimeFacingInterpSpeed));
+
+	// The material measures each vertex from ObjectPositionWS (the mesh bounds
+	// centre). Give it the distance from that centre to the original support-side
+	// bound, so WPO can flatten onto that plane without pushing vertices through it.
+	FVector VisualLocalBoundsMin;
+	FVector VisualLocalBoundsMax;
+	VisualMesh->GetLocalBounds(VisualLocalBoundsMin, VisualLocalBoundsMax);
+	const FVector VisualLocalExtent =
+		(VisualLocalBoundsMax - VisualLocalBoundsMin) * 0.5f;
+	const FVector VisualScale = VisualMesh->GetComponentScale().GetAbs();
+	const FVector SupportNormalLocal =
+		VisualMesh->GetComponentTransform()
+			.InverseTransformVectorNoScale(DesiredUp)
+			.GetSafeNormal();
+	const float OriginalBottomDepth = FMath::Max(
+		FVector::DotProduct(
+			VisualLocalExtent * VisualScale,
+			SupportNormalLocal.GetAbs()),
+		1.0f);
+
+	const FVector MaterialMotionVelocity = SlimeState == EPlayerSlimeState::Attached
+		? FVector::VectorPlaneProject(FrameVelocity, DesiredUp)
+		: HorizontalVelocity;
+	const float MaterialMovementAlpha = FMath::Clamp(
+		MaterialMotionVelocity.Size() / FMath::Max(MoveSpeed, 1.0f),
+		0.0f,
+		1.0f);
+	UpdateSlimeMaterialParameters(
+		MaterialMovementAlpha,
+		LastFacingDirection,
+		DesiredUp,
+		OriginalBottomDepth);
+}
+
+void APlayerCorePawn::UpdateSlimeMaterialParameters(
+	const float MovementAlpha,
+	const FVector& FlowDirection,
+	const FVector& SupportNormal,
+	const float OriginalBottomDepth)
+{
+	if (!SlimeMaterialInstance)
+	{
+		return;
+	}
+
+	// These names are deliberately stable: build matching Scalar/Vector
+	// Parameters in material_dynamic, then use them to offset mesh vertices
+	// through World Position Offset. Values are visual only: collision remains
+	// controlled by CollisionComponent.
+	SlimeMaterialInstance->SetScalarParameterValue(
+		TEXT("SlimeMoveAmount"), MovementAlpha);
+	SlimeMaterialInstance->SetScalarParameterValue(
+		TEXT("SlimeChargeAmount"),
+		SlimeState == EPlayerSlimeState::Charging
+			? PhaseCrashComponent->GetChargeAlpha()
+			: 0.0f);
+	SlimeMaterialInstance->SetScalarParameterValue(
+		TEXT("SlimeDashAmount"),
+		SlimeState == EPlayerSlimeState::Dashing ? 1.0f : 0.0f);
+	SlimeMaterialInstance->SetScalarParameterValue(
+		TEXT("SlimeAttachAmount"),
+		SlimeState == EPlayerSlimeState::Attached ? 1.0f : 0.0f);
+	SlimeMaterialInstance->SetScalarParameterValue(
+		TEXT("SlimeSurfaceContactAmount"),
+		SlimeState == EPlayerSlimeState::Airborne ? 0.0f : 1.0f);
+	SlimeMaterialInstance->SetScalarParameterValue(
+		TEXT("SlimeRestAmount"),
+		SlimeState == EPlayerSlimeState::Idle ? 1.0f : 0.0f);
+	SlimeMaterialInstance->SetScalarParameterValue(
+		TEXT("SlimeFlowPhase"), LocomotionPhase);
+	SlimeMaterialInstance->SetScalarParameterValue(
+		TEXT("SlimeImpactAmount"), SurfaceImpactEnergy);
+	SlimeMaterialInstance->SetScalarParameterValue(
+		TEXT("SlimeBottomLimitDepth"), OriginalBottomDepth);
+	SlimeMaterialInstance->SetVectorParameterValue(
+		TEXT("SlimeFlowDirection"), FLinearColor(FlowDirection));
+	SlimeMaterialInstance->SetVectorParameterValue(
+		TEXT("SlimeSupportNormal"), FLinearColor(SupportNormal));
+	SlimeMaterialInstance->SetVectorParameterValue(
+		TEXT("SlimeDownDirection"), FLinearColor(-SupportNormal));
 }
 
 void APlayerCorePawn::FindBossCameraTarget()

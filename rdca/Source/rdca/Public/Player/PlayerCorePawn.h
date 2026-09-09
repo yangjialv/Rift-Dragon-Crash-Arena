@@ -7,6 +7,7 @@
 class UCameraComponent;
 class UInputAction;
 class UInputMappingContext;
+class UMaterialInstanceDynamic;
 class UMeshComponent;
 class UPhaseCrashComponent;
 class UPlayerHealthComponent;
@@ -89,6 +90,11 @@ private:
 	bool IsCameraOccluderActor(const AActor& Actor) const;
 	FVector GetCameraOcclusionCenter();
 	void UpdateSlimePresentation(float DeltaTime);
+	void UpdateSlimeMaterialParameters(
+		float MovementAlpha,
+		const FVector& FlowDirection,
+		const FVector& SupportNormal,
+		float OriginalBottomDepth);
 	void SetSlimeState(EPlayerSlimeState NewState);
 	void Move(const FInputActionValue& Value);
 	void StartCrashCharge();
@@ -208,6 +214,33 @@ protected:
 		meta = (ClampMin = "0.0"))
 	float IdleWobbleAmount = 2.0f;
 
+	/** Volume-conserving idle pulse. Keeps the resting slime settled rather than rigid. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Presentation|Slime Motion",
+		meta = (ClampMin = "0.0"))
+	float IdlePulseAmount = 0.024f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Presentation|Slime Motion",
+		meta = (ClampMin = "0.0"))
+	float IdlePulseFrequency = 0.8f;
+
+	/** Maximum scale change applied during one natural crawl/compression cycle. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Presentation|Slime Motion",
+		meta = (ClampMin = "0.0", ClampMax = "0.25"))
+	float LocomotionSquirmAmount = 0.052f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Presentation|Slime Motion",
+		meta = (ClampMin = "0.0"))
+	float LocomotionMinFrequency = 1.1f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Presentation|Slime Motion",
+		meta = (ClampMin = "0.0"))
+	float LocomotionMaxFrequency = 2.4f;
+
+	/** Visual-only downward press at the dense part of each crawl cycle. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Presentation|Slime Motion",
+		meta = (ClampMin = "0.0"))
+	float LocomotionPressOffset = 6.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Presentation",
 		meta = (ClampMin = "0.0"))
 	float MovementStateSpeedThreshold = 20.0f;
@@ -238,10 +271,13 @@ private:
 	FVector PreviousPresentationLocation = FVector::ZeroVector;
 	FVector LastFacingDirection = FVector::ForwardVector;
 	float PresentationTime = 0.0f;
+	float LocomotionPhase = 0.0f;
 	float SlimeStateElapsed = 0.0f;
 	float SurfaceImpactEnergy = 0.0f;
 	float DashReboundRemaining = 0.0f;
 	FVector PreviousAttachedNormal = FVector::ZeroVector;
+	/** Runtime instance of VisualMesh material slot 0. It supplies state data to the liquid WPO material. */
+	TObjectPtr<UMaterialInstanceDynamic> SlimeMaterialInstance;
 	FVector LastCameraOcclusionOutward = FVector::ForwardVector;
 	TWeakObjectPtr<AArenaCombatBounds> CameraOcclusionArenaBounds;
 	TSet<TWeakObjectPtr<UMeshComponent>> CameraOccludedComponents;
