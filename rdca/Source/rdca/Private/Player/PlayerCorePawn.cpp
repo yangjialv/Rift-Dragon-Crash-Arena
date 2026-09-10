@@ -408,6 +408,30 @@ void APlayerCorePawn::UpdateSlimePresentation(const float DeltaTime)
 		ShapeMultiplier.Z *= 1.0f - ReboundWave * 0.12f;
 	}
 
+	// A rebound is not a second voluntary dash. Briefly squash the liquid
+	// against the collision direction, then spring it into the reflected path.
+	// The gameplay trajectory remains wholly owned by PhaseCrashComponent.
+	const float ReboundPresentationAlpha =
+		PhaseCrashComponent->GetReboundPresentationAlpha();
+	if (ReboundPresentationAlpha > 0.0f)
+	{
+		const float ReboundElapsedAlpha = 1.0f - ReboundPresentationAlpha;
+		const float EjectionAlpha = FMath::SmoothStep(
+			0.0f,
+			1.0f,
+			ReboundElapsedAlpha / 0.42f);
+		const FVector ImpactSquashShape(0.58f, 1.34f, 0.58f);
+		const FVector EjectionShape(1.58f, 0.80f, 0.82f);
+		ShapeMultiplier = FMath::Lerp(
+			ImpactSquashShape,
+			EjectionShape,
+			EjectionAlpha);
+		BackwardVisualOffset = FMath::Lerp(
+			MovementTrailOffset * 0.65f,
+			MovementTrailOffset * 1.45f,
+			EjectionAlpha);
+	}
+
 	if (DesiredFacing.IsNearlyZero())
 	{
 		DesiredFacing = LastFacingDirection;

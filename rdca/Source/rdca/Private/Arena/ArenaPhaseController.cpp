@@ -3,6 +3,7 @@
 #include "Boss/BossEncounterComponent.h"
 #include "Components/ActorComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "EngineUtils.h"
 #include "Kismet/KismetMaterialLibrary.h"
 #include "Materials/MaterialParameterCollection.h"
@@ -61,6 +62,15 @@ AArenaPhaseController::AArenaPhaseController()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = true;
+
+	PhaseExpansionWaveVisual = CreateDefaultSubobject<UStaticMeshComponent>(
+		TEXT("PhaseExpansionWaveVisual"));
+	PhaseExpansionWaveVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	PhaseExpansionWaveVisual->SetGenerateOverlapEvents(false);
+	PhaseExpansionWaveVisual->SetCastShadow(false);
+	PhaseExpansionWaveVisual->SetReceivesDecals(false);
+	PhaseExpansionWaveVisual->SetMobility(EComponentMobility::Movable);
+	PhaseExpansionWaveVisual->SetHiddenInGame(true);
 }
 
 void AArenaPhaseController::BeginPlay()
@@ -74,16 +84,37 @@ void AArenaPhaseController::BeginPlay()
 		InitializeCyberRift();
 	}
 	UpdateMaterialSphere();
+	UpdateExpansionWaveVisual(false);
+
+	if (bDebugAutoStartTransitionOnBeginPlay)
+	{
+		bDebugTransitionPending = true;
+		DebugTransitionDelayRemaining = FMath::Max(DebugTransitionStartDelay, 0.0f);
+	}
 }
 
 void AArenaPhaseController::Tick(const float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	if (bDebugTransitionPending)
+	{
+		DebugTransitionDelayRemaining = FMath::Max(
+			DebugTransitionDelayRemaining - DeltaTime,
+			0.0f);
+		if (DebugTransitionDelayRemaining <= 0.0f)
+		{
+			bDebugTransitionPending = false;
+			ActiveExpansionDuration = FMath::Max(DebugExpansionDuration, 0.1f);
+			StartPhaseTransition();
+		}
+	}
+
 	if (!bTransitionActive && !bTransitionComplete
 		&& bStartWhenBossEntersPhase2 && BossEncounter.IsValid()
 		&& BossEncounter->GetCombatPhase() == EBossCombatPhase::Phase2)
 	{
+		ActiveExpansionDuration = FMath::Max(ExpansionDuration, 0.1f);
 		StartPhaseTransition();
 	}
 
@@ -94,9 +125,10 @@ void AArenaPhaseController::Tick(const float DeltaTime)
 
 	TransitionElapsed += DeltaTime;
 	const float Alpha = FMath::Clamp(
-		TransitionElapsed / FMath::Max(ExpansionDuration, 0.1f), 0.0f, 1.0f);
+		TransitionElapsed / FMath::Max(ActiveExpansionDuration, 0.1f), 0.0f, 1.0f);
 	CurrentRadius = FMath::Lerp(0.0f, MaximumRadius, Alpha);
 	UpdateMaterialSphere();
+	UpdateExpansionWaveVisual(true);
 
 	if (!bUseMaterialSphereMask)
 	{
@@ -131,6 +163,12 @@ void AArenaPhaseController::StartPhaseTransition()
 	bTransitionActive = true;
 	TransitionElapsed = 0.0f;
 	CurrentRadius = 0.0f;
+	// Blueprint calls use the normal Phase 2 duration unless the debug path
+	// explicitly supplied its temporary slow duration above.
+	if (ActiveExpansionDuration <= 0.0f)
+	{
+		ActiveExpansionDuration = FMath::Max(ExpansionDuration, 0.1f);
+	}
 	if (BossEncounter.IsValid())
 	{
 		BossEncounter->SetEncounterHold(true);
@@ -169,8 +207,9 @@ void AArenaPhaseController::StartPhaseTransition()
 	}
 
 	UpdateMaterialSphere();
+	UpdateExpansionWaveVisual(true);
 	UE_LOG(LogRDCAPlayer, Log, TEXT("Arena phase transition started. Origin=%s Radius=%.0f Duration=%.2f"),
-		*PhaseOrigin.ToCompactString(), MaximumRadius, ExpansionDuration);
+		*PhaseOrigin.ToCompactString(), MaximumRadius, ActiveExpansionDuration);
 }
 
 void AArenaPhaseController::ResolveReferences()
@@ -270,6 +309,7 @@ void AArenaPhaseController::CacheEnvironmentActors()
 
 void AArenaPhaseController::InitializeCyberRift()
 {
+	UpdateExpansionWaveVisual(false);
 	for (FPhaseActorPair& Pair : MappedPairs)
 	{
 		Pair.bRevealed = false;
@@ -321,6 +361,26 @@ void AArenaPhaseController::UpdateMaterialSphere() const
 		GetWorld(), PhaseMaterialParameters, SphereEdgeWidthParameter, SphereEdgeWidth);
 }
 
+void AArenaPhaseController::UpdateExpansionWaveVisual(const bool bShouldBeVisible)
+{
+	if (!PhaseExpansionWaveVisual)
+	{
+		return;
+	}
+
+	PhaseExpansionWaveVisual->SetWorldLocation(PhaseOrigin);
+	if (bShouldBeVisible)
+	{
+		const float VisualRadius = FMath::Max(
+			CurrentRadius + ExpansionWaveRadiusOffset,
+			0.1f);
+		const float UniformScale = VisualRadius
+			/ FMath::Max(ExpansionWaveMeshBaseRadius, 0.01f);
+		PhaseExpansionWaveVisual->SetWorldScale3D(FVector(UniformScale));
+	}
+	PhaseExpansionWaveVisual->SetHiddenInGame(!bShouldBeVisible);
+}
+
 void AArenaPhaseController::RevealPair(FPhaseActorPair& Pair)
 {
 	if (Pair.bRevealed)
@@ -343,6 +403,7 @@ void AArenaPhaseController::RevealPair(FPhaseActorPair& Pair)
 
 void AArenaPhaseController::FinalizeSourceCodeVoid()
 {
+	UpdateExpansionWaveVisual(false);
 	for (FPhaseActorPair& Pair : MappedPairs)
 	{
 		if (!Pair.bRevealed)

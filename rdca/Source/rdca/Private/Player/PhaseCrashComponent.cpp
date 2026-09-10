@@ -118,6 +118,9 @@ void UPhaseCrashComponent::TickComponent(
 	FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	ReboundPresentationRemaining = FMath::Max(
+		ReboundPresentationRemaining - DeltaTime,
+		0.0f);
 
 	if (bAttachCornerTransitionActive)
 	{
@@ -1203,6 +1206,7 @@ void UPhaseCrashComponent::HandleReboundImpact(
 	const UCrashResponseComponent& ResponseComponent)
 {
 	bActiveBossCrash = false;
+	ReboundPresentationRemaining = ReboundPresentationDuration;
 	FVector ReboundDirection = FMath::GetReflectionVector(
 		IncomingDirection,
 		Hit.ImpactNormal.GetSafeNormal());

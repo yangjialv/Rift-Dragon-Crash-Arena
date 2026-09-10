@@ -56,6 +56,15 @@ protected:
 		meta = (ClampMin = "100.0"))
 	float FloorRadius = 3000.0f;
 
+	/**
+	 * Extra collision-only floor beyond FloorRadius. It prevents a visual ring
+	 * whose rim extends slightly farther than its configured gameplay radius
+	 * from becoming a fall-through seam. Anchor placement still uses FloorRadius.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Floor Collision|Shape",
+		meta = (ClampMin = "0.0"))
+	float OuterCollisionSafetyMargin = 200.0f;
+
 	/** No floor collision is created inside this radius. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Floor Collision|Shape",
 		meta = (ClampMin = "0.0"))

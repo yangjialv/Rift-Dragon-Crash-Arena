@@ -100,10 +100,13 @@ void AArenaFloorCollision::UpdateFloorRingGeometry()
 		FloorRingSegmentCount,
 		12,
 		MaxFloorRingSegments);
+	const float CollisionOuterRadius = FMath::Max(
+		FloorRadius + OuterCollisionSafetyMargin,
+		1.0f);
 	const float SafeInnerRadius = FMath::Min(
 		FMath::Max(InnerHoleRadius, 0.0f),
-		FMath::Max(FloorRadius - 1.0f, 0.0f));
-	const float RingWidth = FMath::Max(FloorRadius - SafeInnerRadius, 1.0f);
+		FMath::Max(CollisionOuterRadius - 1.0f, 0.0f));
+	const float RingWidth = FMath::Max(CollisionOuterRadius - SafeInnerRadius, 1.0f);
 	const float MidRadius = SafeInnerRadius + RingWidth * 0.5f;
 	const float TangentialLength = 2.0f * PI * MidRadius / ActiveSegments;
 	const FVector SegmentExtent(

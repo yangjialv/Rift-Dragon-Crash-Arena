@@ -8,6 +8,8 @@ class UBossWeakPointComponent;
 class UMaterialInterface;
 class USceneComponent;
 class UStaticMeshComponent;
+class UMeshComponent;
+class USkeletalMeshComponent;
 class UBoxComponent;
 class UPrimitiveComponent;
 class UProceduralMeshComponent;
@@ -349,6 +351,31 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Visual")
 	TObjectPtr<UMaterialInterface> WeakPointExposedMaterial;
 
+	/** Optional explicit Boss render component. Leave BossMesh as the default, or use the exact component name in BP. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Phase Material")
+	FName BossVisualComponentName = TEXT("BossMesh");
+
+	/** Material slot on the Boss Skeletal Mesh that represents its main body. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Phase Material",
+		meta = (ClampMin = "0"))
+	int32 BossBodyMaterialSlot = 0;
+
+	/** Optional. Empty preserves the Skeletal Mesh's authored initial material. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Phase Material")
+	TObjectPtr<UMaterialInterface> BossPhase1Material;
+
+	/** Applied to BossBodyMaterialSlot as soon as the encounter enters Phase 2. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Phase Material")
+	TObjectPtr<UMaterialInterface> BossPhase2Material;
+
+	/**
+	 * Renders an animation-synchronised Phase 2 copy of the Boss. Use only
+	 * after the Phase 1 and Phase 2 Boss materials both implement the arena
+	 * sphere mask; this makes the expanding sphere reveal the Boss per pixel.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Phase Material")
+	bool bUseSphereMaskedBossPhaseTransition = false;
+
 private:
 	void SetEncounterState(EBossEncounterState NewState);
 	void SelectNextAttack();
@@ -371,6 +398,9 @@ private:
 	void UpdateShockwaveProceduralVisual(float ConfiguredRadius);
 	void SetShockwaveProceduralVisualVisible(bool bVisible);
 	void SetShockwaveProceduralVisualMaterial(UMaterialInterface* Material);
+	void ResolveBossVisual();
+	void CreateSphereMaskedBossPhaseVisual();
+	void UpdateBossPhaseMaterial();
 	void CreateShockwaveCollisionSegments();
 	void UpdateShockwaveCollisionSegments(float RingCenterRadius);
 	void SetShockwaveCollisionEnabled(bool bEnabled);
@@ -404,6 +434,8 @@ private:
 	TWeakObjectPtr<UStaticMeshComponent> ShockwaveVisual;
 	TWeakObjectPtr<UStaticMeshComponent> WeakPointVisual;
 	TWeakObjectPtr<UBossWeakPointComponent> WeakPoint;
+	TWeakObjectPtr<UMeshComponent> BossVisual;
+	TObjectPtr<USkeletalMeshComponent> BossPhase2SphereVisual;
 	TWeakObjectPtr<USceneComponent> ProjectileOrigin;
 	TWeakObjectPtr<USceneComponent> LaserOrigin;
 	TWeakObjectPtr<USceneComponent> ShockwaveOrigin;
@@ -433,6 +465,8 @@ private:
 	float StateElapsed = 0.0f;
 	float PreviousShockwaveRadius = 0.0f;
 	bool bPlayerDamagedThisAttack = false;
+	bool bBossPhaseMaterialApplied = false;
+	EBossCombatPhase LastAppliedBossMaterialPhase = EBossCombatPhase::Dead;
 	bool bEncounterStopped = false;
 	bool bIntroHold = false;
 	int32 CompletedAttacksSinceExposure = 0;

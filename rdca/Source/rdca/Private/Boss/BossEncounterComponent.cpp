@@ -4,7 +4,9 @@
 #include "Boss/BossFanProjectile.h"
 #include "Boss/BossSweepLaser.h"
 #include "Components/BoxComponent.h"
+#include "Components/MeshComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "EngineUtils.h"
@@ -118,6 +120,8 @@ void UBossEncounterComponent::BeginPlay()
 	Super::BeginPlay();
 
 	WeakPoint = GetOwner()->FindComponentByClass<UBossWeakPointComponent>();
+	ResolveBossVisual();
+	CreateSphereMaskedBossPhaseVisual();
 	ProjectileOrigin = FindNamedSceneComponent(TEXT("ProjectileOrigin"));
 	LaserOrigin = FindNamedSceneComponent(TEXT("LaserOrigin"));
 	ShockwaveOrigin = FindNamedSceneComponent(TEXT("ShockwaveOrigin"));
@@ -188,6 +192,7 @@ void UBossEncounterComponent::BeginPlay()
 	}
 	CreateShockwaveProceduralVisual();
 	CreateShockwaveCollisionSegments();
+	UpdateBossPhaseMaterial();
 
 	ActiveAttackRandomSeed =
 		AttackSelectionRandomSeed >= 0
@@ -212,6 +217,7 @@ void UBossEncounterComponent::TickComponent(
 	FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	UpdateBossPhaseMaterial();
 
 	if (WeakPoint.IsValid() && WeakPoint->IsBossDefeated())
 	{
@@ -1681,6 +1687,132 @@ void UBossEncounterComponent::UpdateWeakPointVisual(const bool bExposed)
 	{
 		WeakPointVisual->SetMaterial(0, Material);
 	}
+}
+
+void UBossEncounterComponent::ResolveBossVisual()
+{
+	BossVisual.Reset();
+	if (!GetOwner())
+	{
+		return;
+	}
+
+	TArray<UMeshComponent*> MeshComponents;
+	GetOwner()->GetComponents<UMeshComponent>(MeshComponents);
+	for (UMeshComponent* Mesh : MeshComponents)
+	{
+		if (Mesh && Mesh->GetName().Equals(
+			BossVisualComponentName.ToString(), ESearchCase::IgnoreCase))
+		{
+			BossVisual = Mesh;
+			return;
+		}
+	}
+
+	// Most Boss Blueprints have one skeletal render mesh plus static helper
+	// meshes for the weak point and shockwave. Prefer the skeletal mesh when
+	// its authored component name differs from the default BossMesh.
+	for (UMeshComponent* Mesh : MeshComponents)
+	{
+		if (Cast<USkeletalMeshComponent>(Mesh))
+		{
+			BossVisual = Mesh;
+			return;
+		}
+	}
+}
+
+void UBossEncounterComponent::UpdateBossPhaseMaterial()
+{
+	if (bUseSphereMaskedBossPhaseTransition)
+	{
+		return;
+	}
+
+	if (!BossVisual.IsValid())
+	{
+		ResolveBossVisual();
+	}
+	if (!BossVisual.IsValid())
+	{
+		return;
+	}
+
+	const EBossCombatPhase DesiredPhase = GetCombatPhase();
+	if (bBossPhaseMaterialApplied && DesiredPhase == LastAppliedBossMaterialPhase)
+	{
+		return;
+	}
+
+	UMaterialInterface* Material = DesiredPhase == EBossCombatPhase::Phase2
+		? BossPhase2Material.Get()
+		: BossPhase1Material.Get();
+	if (Material)
+	{
+		BossVisual->SetMaterial(BossBodyMaterialSlot, Material);
+	}
+
+	bBossPhaseMaterialApplied = true;
+	LastAppliedBossMaterialPhase = DesiredPhase;
+}
+
+void UBossEncounterComponent::CreateSphereMaskedBossPhaseVisual()
+{
+	if (!bUseSphereMaskedBossPhaseTransition
+		|| BossPhase2SphereVisual
+		|| !GetOwner())
+	{
+		return;
+	}
+
+	USkeletalMeshComponent* SourceMesh = Cast<USkeletalMeshComponent>(
+		BossVisual.Get());
+	if (!SourceMesh)
+	{
+		UE_LOG(
+			LogRDCAPlayer,
+			Warning,
+			TEXT("Sphere-masked Boss phase transition requires a Skeletal Mesh. Resolved=%s"),
+			*GetNameSafe(BossVisual.Get()));
+		return;
+	}
+	if (!BossPhase2Material)
+	{
+		UE_LOG(
+			LogRDCAPlayer,
+			Warning,
+			TEXT("Sphere-masked Boss phase transition enabled without BossPhase2Material."));
+		return;
+	}
+
+	if (BossPhase1Material)
+	{
+		SourceMesh->SetMaterial(BossBodyMaterialSlot, BossPhase1Material);
+	}
+
+	BossPhase2SphereVisual = NewObject<USkeletalMeshComponent>(
+		GetOwner(), TEXT("BossPhase2SphereVisual_Runtime"));
+	BossPhase2SphereVisual->SetSkeletalMeshAsset(
+		SourceMesh->GetSkeletalMeshAsset());
+	for (int32 MaterialIndex = 0;
+		MaterialIndex < SourceMesh->GetNumMaterials();
+		++MaterialIndex)
+	{
+		BossPhase2SphereVisual->SetMaterial(
+			MaterialIndex, SourceMesh->GetMaterial(MaterialIndex));
+	}
+	BossPhase2SphereVisual->SetMaterial(
+		BossBodyMaterialSlot, BossPhase2Material);
+	BossPhase2SphereVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	BossPhase2SphereVisual->SetGenerateOverlapEvents(false);
+	BossPhase2SphereVisual->SetCastShadow(true);
+	GetOwner()->AddInstanceComponent(BossPhase2SphereVisual);
+	BossPhase2SphereVisual->RegisterComponent();
+	BossPhase2SphereVisual->AttachToComponent(
+		SourceMesh, FAttachmentTransformRules::SnapToTargetIncludingScale);
+	BossPhase2SphereVisual->SetLeaderPoseComponent(SourceMesh, true);
+	BossPhase2SphereVisual->SetVisibility(true, true);
+	BossPhase2SphereVisual->SetHiddenInGame(false, true);
 }
 
 USceneComponent* UBossEncounterComponent::FindNamedSceneComponent(

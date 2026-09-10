@@ -118,6 +118,18 @@ public:
 			: 0.0f;
 	}
 
+	/** One-shot visual signal fired by a solid rebound; 1 at impact and 0 at recovery. */
+	UFUNCTION(BlueprintPure, Category = "Phase Crash|Presentation")
+	float GetReboundPresentationAlpha() const
+	{
+		return ReboundPresentationDuration > UE_KINDA_SMALL_NUMBER
+			? FMath::Clamp(
+				ReboundPresentationRemaining / ReboundPresentationDuration,
+				0.0f,
+				1.0f)
+			: 0.0f;
+	}
+
 	UFUNCTION(BlueprintPure, Category = "Phase Crash")
 	FVector GetAimDirection() const
 	{
@@ -210,6 +222,11 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Timing",
 		meta = (ClampMin = "0.0"))
 	float CooldownDuration = 0.45f;
+
+	/** Visual-only impact-to-ejection time after any Rebound collision. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Presentation",
+		meta = (ClampMin = "0.01"))
+	float ReboundPresentationDuration = 0.18f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Charge",
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
@@ -319,4 +336,5 @@ private:
 	float VerticalVelocity = 0.0f;
 	float RecoveryRemaining = 0.0f;
 	float CooldownRemaining = 0.0f;
+	float ReboundPresentationRemaining = 0.0f;
 };

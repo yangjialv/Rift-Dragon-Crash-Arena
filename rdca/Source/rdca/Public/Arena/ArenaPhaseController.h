@@ -6,6 +6,7 @@
 
 class UBossEncounterComponent;
 class UMaterialParameterCollection;
+class UStaticMeshComponent;
 
 /**
  * Switches the arena from Cyber Rift to Source Code Void when the Boss enters
@@ -50,6 +51,20 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Phase|Setup")
 	bool bInitializeCyberRiftOnBeginPlay = true;
+
+	/** Debug only: play the Cyber Rift -> Source Code Void reveal immediately after level load. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Phase|Debug")
+	bool bDebugAutoStartTransitionOnBeginPlay = true;
+
+	/** Briefly keep the initial Cyber Rift visible before the debug transition starts. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Phase|Debug",
+		meta = (ClampMin = "0.0"))
+	float DebugTransitionStartDelay = 0.25f;
+
+	/** Slow duration used by the automatic debug reveal. Does not change the normal Phase 2 duration. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Phase|Debug",
+		meta = (ClampMin = "0.1"))
+	float DebugExpansionDuration = 12.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Phase|Timing", meta = (ClampMin = "0.1"))
 	float ExpansionDuration = 1.0f;
@@ -99,6 +114,18 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Phase|Material Sphere", meta = (ClampMin = "0.0"))
 	float SphereEdgeWidth = 150.0f;
 
+	/** Visual-only shell that rides on the material-switch sphere. Assign a sphere mesh and material in Blueprint. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Arena Phase|Expansion Wave")
+	TObjectPtr<UStaticMeshComponent> PhaseExpansionWaveVisual;
+
+	/** Radius of the assigned sphere mesh at scale 1. Engine BasicShapes/Sphere is 50 cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Phase|Expansion Wave", meta = (ClampMin = "0.01"))
+	float ExpansionWaveMeshBaseRadius = 50.0f;
+
+	/** Lets the energy shell sit just outside the exact material-switch boundary. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Phase|Expansion Wave")
+	float ExpansionWaveRadiusOffset = 0.0f;
+
 private:
 	struct FPhaseActorPair
 	{
@@ -112,6 +139,7 @@ private:
 	void CacheEnvironmentActors();
 	void InitializeCyberRift();
 	void UpdateMaterialSphere() const;
+	void UpdateExpansionWaveVisual(bool bShouldBeVisible);
 	void RevealPair(FPhaseActorPair& Pair);
 	void FinalizeSourceCodeVoid();
 	void SetActorCollision(AActor* Actor, bool bEnabled) const;
@@ -125,6 +153,9 @@ private:
 	FVector PhaseOrigin = FVector::ZeroVector;
 	float CurrentRadius = 0.0f;
 	float TransitionElapsed = 0.0f;
+	float ActiveExpansionDuration = 0.0f;
+	float DebugTransitionDelayRemaining = 0.0f;
 	bool bTransitionActive = false;
 	bool bTransitionComplete = false;
+	bool bDebugTransitionPending = false;
 };
