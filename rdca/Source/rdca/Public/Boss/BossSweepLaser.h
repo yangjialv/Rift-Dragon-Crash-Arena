@@ -30,6 +30,7 @@ public:
 	void UpdateWarningPose(const FVector& WorldLocation, float WorldYaw);
 	void ConfigureSweep(float NewStartYaw, float NewEndYaw);
 	float GetCurrentLaserYaw() const { return GetActorRotation().Yaw; }
+	bool IsActorInsideWarningArea(const AActor* Candidate) const;
 
 protected:
 	UFUNCTION()
@@ -53,20 +54,30 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Laser")
 	TObjectPtr<UStaticMeshComponent> LaserVisual;
 
+	/** Stable ground warning driven by Boss facing, independent of head animation. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Laser|Warning")
+	TObjectPtr<UStaticMeshComponent> GroundWarningVisual;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Laser")
 	TObjectPtr<UNiagaraComponent> LaserEffect;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Laser",
-		meta = (ClampMin = "100.0"))
+		meta = (ClampMin = "100.0",
+			DisplayName = "Laser Length",
+			ToolTip = "Full gameplay laser length in world units. Also drives the damage volume and native laser visual."))
 	float LaserLength = 1400.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Laser",
-		meta = (ClampMin = "1.0"))
-	float LaserHalfWidth = 20.0f;
+		meta = (ClampMin = "1.0",
+			DisplayName = "Laser Width",
+			ToolTip = "Full gameplay laser width in world units. The damage volume and native laser visual use this exact width."))
+	float LaserWidth = 40.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Laser",
-		meta = (ClampMin = "1.0"))
-	float LaserHalfHeight = 45.0f;
+		meta = (ClampMin = "1.0",
+			DisplayName = "Laser Height",
+			ToolTip = "Full vertical height of the laser damage volume and native laser visual."))
+	float LaserHeight = 90.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Laser|Visual")
 	TObjectPtr<UMaterialInterface> WarningMaterial;
@@ -80,6 +91,39 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Laser|Visual")
 	FRotator VisualRotationOffset = FRotator::ZeroRotator;
 
+	/** Keep false when Niagara is the complete active flame presentation. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Laser|Visual")
+	bool bShowLaserVisualDuringActive = false;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Laser|Warning")
+	TObjectPtr<UMaterialInterface> GroundWarningMaterial;
+
+	/** Distance from the Boss centre to the beginning of the warning corridor. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Laser|Warning",
+		meta = (ClampMin = "0.0"))
+	float GroundWarningStartOffset = 300.0f;
+
+	/** Full horizontal width of the warning area in world units. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Laser|Warning",
+		meta = (ClampMin = "1.0", DisplayName = "Ground Warning Width"))
+	float GroundWarningWidth = 50.0f;
+
+	/** Maximum forward length of the ground warning before arena-floor clipping. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Laser|Warning",
+		meta = (ClampMin = "1.0", DisplayName = "Ground Warning Length"))
+	float GroundWarningLength = 1400.0f;
+
+	/** Vertical thickness of the warning slab. Its bottom remains on the arena floor. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Laser|Warning",
+		meta = (ClampMin = "0.1", DisplayName = "Ground Warning Thickness"))
+	float GroundWarningThickness = 2.0f;
+
+	/** Small separation from the floor used only to prevent depth flicker. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, AdvancedDisplay,
+		Category = "Laser|Warning",
+		meta = (ClampMin = "0.0", DisplayName = "Ground Warning Surface Offset"))
+	float GroundWarningSurfaceOffset = 0.5f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Laser|Anchor",
 		meta = (ClampMin = "0.0"))
 	float AnchorOverloadPerSecond = 0.35f;
@@ -88,6 +132,8 @@ private:
 	void ApplyDamageToActor(AActor* OtherActor);
 	void ApplyAnchorOverload(float DeltaTime);
 	void UpdateComponentDimensions();
+	void UpdateGroundWarningVisual();
+	bool ResolveTaggedGroundHeight(float& OutGroundZ) const;
 
 	TSet<TWeakObjectPtr<AActor>> DamagedActors;
 	float StartYaw = 0.0f;

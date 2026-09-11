@@ -12,7 +12,14 @@
 
 AArenaIntroDirector::AArenaIntroDirector()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = true;
+}
+
+void AArenaIntroDirector::Tick(const float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+	TickBossDescent(DeltaTime);
 }
 
 void AArenaIntroDirector::BeginPlay()
@@ -56,7 +63,7 @@ void AArenaIntroDirector::HandleBossAnimationEvent(
 		ShatterCyberCenter();
 		break;
 	case EBossAnimationEvent::IntroFinished:
-		CompleteIntro();
+		BeginBossDescent();
 		break;
 	default:
 		break;
@@ -77,9 +84,76 @@ void AArenaIntroDirector::ResolveReferences()
 					It->FindComponentByClass<UBossAnimationComponent>())
 			{
 				BossAnimation = Candidate;
+				BossActor = *It;
 				break;
 			}
 		}
+	}
+}
+
+void AArenaIntroDirector::BeginBossDescent()
+{
+	if (bIntroCompleted || bBossDescentActive)
+	{
+		return;
+	}
+	if (!bDescendBossAfterTakeoff || !BossActor || !BossCombatHoverTarget)
+	{
+		if (bDescendBossAfterTakeoff && (!BossActor || !BossCombatHoverTarget))
+		{
+			UE_LOG(
+				LogRDCAPlayer,
+				Warning,
+				TEXT("Arena intro Boss descent skipped. Boss=%s HoverTarget=%s"),
+				*GetNameSafe(BossActor),
+				*GetNameSafe(BossCombatHoverTarget));
+		}
+		CompleteIntro();
+		return;
+	}
+
+	BossDescentStart = BossActor->GetActorLocation();
+	BossDescentEnd = BossCombatHoverTarget->GetActorLocation();
+	BossDescentElapsed = 0.0f;
+	if (BossDescentDuration <= UE_KINDA_SMALL_NUMBER)
+	{
+		BossActor->SetActorLocation(BossDescentEnd, false);
+		CompleteIntro();
+		return;
+	}
+
+	bBossDescentActive = true;
+	UE_LOG(
+		LogRDCAPlayer,
+		Log,
+		TEXT("Arena intro Boss descent started. Start=%s End=%s Duration=%.2f"),
+		*BossDescentStart.ToCompactString(),
+		*BossDescentEnd.ToCompactString(),
+		BossDescentDuration);
+}
+
+void AArenaIntroDirector::TickBossDescent(const float DeltaTime)
+{
+	if (!bBossDescentActive || !BossActor)
+	{
+		return;
+	}
+
+	BossDescentElapsed += DeltaTime;
+	const float Alpha = FMath::Clamp(
+		BossDescentElapsed / FMath::Max(BossDescentDuration, 0.01f),
+		0.0f,
+		1.0f);
+	const float SmoothedAlpha = FMath::SmoothStep(0.0f, 1.0f, Alpha);
+	BossActor->SetActorLocation(FMath::Lerp(
+		BossDescentStart,
+		BossDescentEnd,
+		SmoothedAlpha), false);
+
+	if (Alpha >= 1.0f)
+	{
+		bBossDescentActive = false;
+		CompleteIntro();
 	}
 }
 

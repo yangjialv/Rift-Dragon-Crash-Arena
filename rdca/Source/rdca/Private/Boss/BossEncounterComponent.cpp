@@ -161,10 +161,10 @@ void UBossEncounterComponent::BeginPlay()
 			WeakPointVisual = Mesh;
 		}
 	}
-	if (ShockwaveOrigin.IsValid() && ShockwaveVisual.IsValid())
+	if (ShockwaveVisual.IsValid())
 	{
 		ShockwaveVisual->SetWorldLocation(
-			ShockwaveOrigin->GetComponentLocation());
+			GetShockwaveOriginLocation());
 	}
 	if (WeakPointOrigin.IsValid())
 	{
@@ -238,6 +238,7 @@ void UBossEncounterComponent::TickComponent(
 	}
 
 	StateElapsed += DeltaTime;
+	UpdateLaserVerticalMovement();
 	UpdateBossFacing(DeltaTime);
 	switch (EncounterState)
 	{
@@ -336,6 +337,7 @@ void UBossEncounterComponent::SetEncounterHold(const bool bHold)
 	bIntroHold = bHold;
 	if (bIntroHold)
 	{
+		RestoreBossLaserHeight();
 		CurrentAttack = EBossAttackType::None;
 		StateElapsed = 0.0f;
 		if (EncounterState != EBossEncounterState::Idle)
@@ -363,6 +365,7 @@ void UBossEncounterComponent::StopEncounter()
 		return;
 	}
 	bEncounterStopped = true;
+	RestoreBossLaserHeight();
 
 	if (ShockwaveVisual.IsValid())
 	{
@@ -405,6 +408,13 @@ void UBossEncounterComponent::SetEncounterState(
 	}
 
 	const EBossEncounterState PreviousState = EncounterState;
+	if (bLaserHeightAdjusted
+		&& ((PreviousState == EBossEncounterState::Recovery
+				&& NewState != EBossEncounterState::Recovery)
+			|| NewState == EBossEncounterState::Dead))
+	{
+		RestoreBossLaserHeight();
+	}
 	EncounterState = NewState;
 	StateElapsed = 0.0f;
 
@@ -484,6 +494,11 @@ void UBossEncounterComponent::SelectNextAttack()
 EBossAttackType UBossEncounterComponent::ChooseWeightedAttack(
 	const FBossAttackWeights& Weights)
 {
+	if (bDebugForceSweepLaser && SweepLaserClass)
+	{
+		return EBossAttackType::SweepLaser;
+	}
+
 	struct FWeightedCandidate
 	{
 		EBossAttackType Attack = EBossAttackType::None;
@@ -586,7 +601,8 @@ float UBossEncounterComponent::GetCurrentAttackWarningDuration() const
 	case EBossAttackType::FanBarrage:
 		return FanBarrageWarningDuration;
 	case EBossAttackType::SweepLaser:
-		return LaserAimWarningDuration;
+		return LaserAimWarningDuration
+			+ FMath::Max(LaserPostWarningPauseDuration, 0.0f);
 	case EBossAttackType::Shockwave:
 	default:
 		return WarningDuration;
@@ -629,12 +645,9 @@ void UBossEncounterComponent::BeginCurrentAttackWarning()
 			// The visual is the authoritative representation of this attack.  Lock its
 			// center to the emitter at warning start; later damage queries read this
 			// same component location, so animation movement cannot split the damage
-			// circle from the displayed ring.
-			if (ShockwaveOrigin.IsValid())
-			{
-				ShockwaveVisual->SetWorldLocation(
-					ShockwaveOrigin->GetComponentLocation());
-			}
+			// circle from the displayed ring. A level-space World Anchor, when
+			// configured, deliberately takes priority over the Boss-local emitter.
+			ShockwaveVisual->SetWorldLocation(GetShockwaveOriginLocation());
 			SetShockwaveVisualRadius(FMath::Min(
 				ShockwaveInitialRadius,
 				ShockwaveExpandedMaximumRadius));
@@ -653,13 +666,8 @@ void UBossEncounterComponent::BeginCurrentAttackWarning()
 	}
 	if (CurrentAttack == EBossAttackType::SweepLaser)
 	{
-		if (const APawn* PlayerPawn =
-				UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
-		{
-			LaserWarningInitialPlayerLocation =
-				PlayerPawn->GetActorLocation();
-		}
 		bLaserAimLocked = false;
+		BeginLaserVerticalMovement();
 		SpawnLaserWarning();
 	}
 }
@@ -718,6 +726,7 @@ void UBossEncounterComponent::BeginCurrentAttack()
 			{
 				LockLaserSweep();
 			}
+			ConfigureLaserSweepAtPauseEnd();
 			ActiveSweepLaser->ActivateLaser();
 		}
 		break;
@@ -813,35 +822,19 @@ void UBossEncounterComponent::UpdateLaserWarning()
 		return;
 	}
 
-	APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-	if (!PlayerPawn)
-	{
-		return;
-	}
-
-	const float LockStartTime = FMath::Max(
-		LaserAimWarningDuration
-			- FMath::Clamp(
-				LaserAimLockDuration,
-				0.05f,
-				LaserAimWarningDuration),
-		0.0f);
-	if (StateElapsed >= LockStartTime)
+	if (StateElapsed >= FMath::Max(LaserAimWarningDuration, 0.1f))
 	{
 		LockLaserSweep();
 		return;
 	}
 
 	const FVector OriginLocation = GetLaserOriginLocation();
-	FVector ToPlayer = PlayerPawn->GetActorLocation() - OriginLocation;
-	ToPlayer.Z = 0.0f;
-	if (ToPlayer.Normalize())
-	{
-		LaserWarningCurrentYaw = ToPlayer.Rotation().Yaw;
-		ActiveSweepLaser->UpdateWarningPose(
-			OriginLocation,
-			LaserWarningCurrentYaw);
-	}
+	LaserWarningCurrentYaw = GetOwner()
+		? GetOwner()->GetActorRotation().Yaw
+		: ActiveSweepLaser->GetActorRotation().Yaw;
+	ActiveSweepLaser->UpdateWarningPose(
+		OriginLocation,
+		LaserWarningCurrentYaw);
 }
 
 void UBossEncounterComponent::LockLaserSweep()
@@ -851,51 +844,161 @@ void UBossEncounterComponent::LockLaserSweep()
 		return;
 	}
 
-	APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
 	const FVector OriginLocation = GetLaserOriginLocation();
-	const FVector CurrentPlayerLocation = PlayerPawn
-		? PlayerPawn->GetActorLocation()
-		: LockedTargetLocation;
-	FVector LockedDirection = CurrentPlayerLocation - OriginLocation;
-	LockedDirection.Z = 0.0f;
-	if (LockedDirection.Normalize())
-	{
-		LaserWarningCurrentYaw = LockedDirection.Rotation().Yaw;
-	}
-
-	FVector InitialDirection =
-		LaserWarningInitialPlayerLocation - OriginLocation;
-	InitialDirection.Z = 0.0f;
-	InitialDirection.Normalize();
-	FVector PlayerMovement =
-		CurrentPlayerLocation - LaserWarningInitialPlayerLocation;
-	PlayerMovement.Z = 0.0f;
-	float MovementSide = FVector::CrossProduct(
-		InitialDirection,
-		PlayerMovement).Z;
-	if (FMath::Abs(MovementSide) <= 5.0f)
-	{
-		MovementSide = AttackRandomStream.FRand() < 0.5f ? -1.0f : 1.0f;
-	}
-	const float SweepSign = MovementSide >= 0.0f ? 1.0f : -1.0f;
-	const float StartYaw = LaserWarningCurrentYaw - SweepSign * 5.0f;
-	const float EndYaw =
-		LaserWarningCurrentYaw + SweepSign * LaserActiveSweepDegrees;
-
-	LockedTargetLocation = CurrentPlayerLocation;
+	LaserWarningCurrentYaw = GetOwner()
+		? GetOwner()->GetActorRotation().Yaw
+		: ActiveSweepLaser->GetActorRotation().Yaw;
 	bLaserAimLocked = true;
-	ActiveSweepLaser->UpdateWarningPose(OriginLocation, StartYaw);
-	ActiveSweepLaser->ConfigureSweep(StartYaw, EndYaw);
+	ActiveSweepLaser->UpdateWarningPose(OriginLocation, LaserWarningCurrentYaw);
+	ActiveSweepLaser->ConfigureSweep(
+		LaserWarningCurrentYaw,
+		LaserWarningCurrentYaw);
 
 	UE_LOG(
 		LogRDCAPlayer,
 		Log,
-		TEXT("Boss laser aim locked. Boss=%s StartYaw=%.1f EndYaw=%.1f PlayerMovement=%s LockLead=%.2f"),
+		TEXT("Boss laser warning locked. Boss=%s Yaw=%.1f Pause=%.2f"),
 		*GetNameSafe(GetOwner()),
-		StartYaw,
-		EndYaw,
-		*PlayerMovement.ToCompactString(),
-		LaserAimLockDuration);
+		LaserWarningCurrentYaw,
+		LaserPostWarningPauseDuration);
+}
+
+void UBossEncounterComponent::ConfigureLaserSweepAtPauseEnd()
+{
+	if (!ActiveSweepLaser.IsValid())
+	{
+		return;
+	}
+	// The warning uses the stable Boss frame, but the flame must still begin at
+	// the mouth's latest animated position after the pause has elapsed.
+	ActiveSweepLaser->UpdateWarningPose(
+		GetLaserOriginLocation(),
+		LaserWarningCurrentYaw);
+
+	const APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+	const bool bPlayerInsideWarning = PlayerPawn
+		&& ActiveSweepLaser->IsActorInsideWarningArea(PlayerPawn);
+	float EndYaw = LaserWarningCurrentYaw;
+	float SideSign = 0.0f;
+	if (!bPlayerInsideWarning && PlayerPawn && GetOwner())
+	{
+		FVector ToPlayer = PlayerPawn->GetActorLocation()
+			- GetOwner()->GetActorLocation();
+		ToPlayer.Z = 0.0f;
+		if (ToPlayer.Normalize())
+		{
+			const FVector LockedForward = FRotator(
+				0.0f,
+				LaserWarningCurrentYaw,
+				0.0f).Vector();
+			const float Side = FVector::CrossProduct(
+				LockedForward,
+				ToPlayer).Z;
+			if (!FMath::IsNearlyZero(Side, 0.001f))
+			{
+				SideSign = Side > 0.0f ? 1.0f : -1.0f;
+				EndYaw = LaserWarningCurrentYaw
+					+ SideSign * LaserActiveSweepDegrees;
+			}
+		}
+	}
+
+	ActiveSweepLaser->ConfigureSweep(LaserWarningCurrentYaw, EndYaw);
+	UE_LOG(
+		LogRDCAPlayer,
+		Log,
+		TEXT("Boss laser pause ended. PlayerInside=%s Side=%s StartYaw=%.1f EndYaw=%.1f"),
+		bPlayerInsideWarning ? TEXT("true") : TEXT("false"),
+		SideSign > 0.0f
+			? TEXT("left")
+			: (SideSign < 0.0f ? TEXT("right") : TEXT("straight")),
+		LaserWarningCurrentYaw,
+		EndYaw);
+}
+
+void UBossEncounterComponent::BeginLaserVerticalMovement()
+{
+	if (!GetOwner())
+	{
+		return;
+	}
+
+	// Capture the flying height once per laser attack. Repeated warning updates
+	// must never subtract the descent distance again.
+	if (!bLaserHeightAdjusted)
+	{
+		LaserBaseActorZ = GetOwner()->GetActorLocation().Z;
+		bLaserHeightAdjusted = true;
+	}
+	UpdateLaserVerticalMovement();
+}
+
+void UBossEncounterComponent::UpdateLaserVerticalMovement()
+{
+	if (!bLaserHeightAdjusted || !GetOwner())
+	{
+		return;
+	}
+
+	const float LoweredZ = LaserBaseActorZ
+		- FMath::Max(LaserWarningDescentDistance, 0.0f);
+	float DesiredZ = GetOwner()->GetActorLocation().Z;
+	if (EncounterState == EBossEncounterState::Preparing
+		&& CurrentAttack == EBossAttackType::SweepLaser)
+	{
+		const float Alpha = FMath::Clamp(
+			StateElapsed / FMath::Max(LaserWarningDescentDuration, 0.01f),
+			0.0f,
+			1.0f);
+		DesiredZ = FMath::InterpEaseInOut(
+			LaserBaseActorZ,
+			LoweredZ,
+			Alpha,
+			2.0f);
+	}
+	else if (EncounterState == EBossEncounterState::Attacking
+		&& CurrentAttack == EBossAttackType::SweepLaser)
+	{
+		DesiredZ = LoweredZ;
+	}
+	else if (EncounterState == EBossEncounterState::Recovery
+		&& CurrentAttack == EBossAttackType::SweepLaser)
+	{
+		const float Alpha = FMath::Clamp(
+			StateElapsed / FMath::Max(LaserRecoveryAscentDuration, 0.01f),
+			0.0f,
+			1.0f);
+		DesiredZ = FMath::InterpEaseInOut(
+			LoweredZ,
+			LaserBaseActorZ,
+			Alpha,
+			2.0f);
+	}
+	else
+	{
+		RestoreBossLaserHeight();
+		return;
+	}
+
+	FVector NewLocation = GetOwner()->GetActorLocation();
+	NewLocation.Z = DesiredZ;
+	GetOwner()->SetActorLocation(NewLocation);
+}
+
+void UBossEncounterComponent::RestoreBossLaserHeight()
+{
+	if (!bLaserHeightAdjusted)
+	{
+		return;
+	}
+
+	if (GetOwner())
+	{
+		FVector NewLocation = GetOwner()->GetActorLocation();
+		NewLocation.Z = LaserBaseActorZ;
+		GetOwner()->SetActorLocation(NewLocation);
+	}
+	bLaserHeightAdjusted = false;
 }
 
 void UBossEncounterComponent::SpawnLaserWarning()
@@ -911,9 +1014,9 @@ void UBossEncounterComponent::SpawnLaserWarning()
 	}
 
 	const FVector SpawnLocation = GetLaserOriginLocation();
-	FVector ToPlayer = LockedTargetLocation - SpawnLocation;
-	ToPlayer.Z = 0.0f;
-	const float CenterYaw = ToPlayer.Rotation().Yaw;
+	const float CenterYaw = GetOwner()
+		? GetOwner()->GetActorRotation().Yaw
+		: 0.0f;
 	LaserWarningCurrentYaw = CenterYaw;
 
 	FActorSpawnParameters SpawnParameters;
@@ -1178,6 +1281,14 @@ void UBossEncounterComponent::SpawnFanBarrageProjectile(
 
 void UBossEncounterComponent::UpdateShockwave(const float NormalizedTime)
 {
+	// Reapply the configured level-space anchor every tick. The visual is a
+	// component of the Boss actor for lifecycle convenience, but its center must
+	// not inherit any airborne movement or animation-driven Boss translation.
+	if (ShockwaveVisual.IsValid())
+	{
+		ShockwaveVisual->SetWorldLocation(GetShockwaveOriginLocation());
+	}
+
 	const float InitialRadius = FMath::Min(
 		ShockwaveInitialRadius,
 		ShockwaveExpandedMaximumRadius);
@@ -1854,6 +1965,10 @@ FVector UBossEncounterComponent::GetLaserOriginLocation() const
 
 FVector UBossEncounterComponent::GetShockwaveOriginLocation() const
 {
+	if (IsValid(ShockwaveWorldAnchor))
+	{
+		return ShockwaveWorldAnchor->GetActorLocation();
+	}
 	if (ShockwaveOrigin.IsValid())
 	{
 		return ShockwaveOrigin->GetComponentLocation();

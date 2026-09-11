@@ -182,6 +182,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Selection")
 	int32 AttackSelectionRandomSeed = -1;
 
+	/** Temporary combat-debug override. Disable this to restore the configured weighted attack selection. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Debug")
+	bool bDebugForceSweepLaser = false;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Selection")
 	FBossAttackWeights GroundedAttackWeights;
 
@@ -266,9 +270,10 @@ protected:
 		meta = (ClampMin = "0.1"))
 	float LaserAimWarningDuration = 1.4f;
 
+	/** Time after the warning direction locks and before the player side is sampled. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Laser Attack",
-		meta = (ClampMin = "0.05", ClampMax = "1.0"))
-	float LaserAimLockDuration = 0.25f;
+		meta = (ClampMin = "0.0", ClampMax = "2.0"))
+	float LaserPostWarningPauseDuration = 0.40f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Laser Attack",
 		meta = (ClampMin = "0.1"))
@@ -277,6 +282,21 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Laser Attack",
 		meta = (ClampMin = "1.0", ClampMax = "300.0"))
 	float LaserActiveSweepDegrees = 80.0f;
+
+	/** How far the entire Boss descends when laser warning begins. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Laser Attack",
+		meta = (ClampMin = "0.0", DisplayName = "Laser Warning Descent Distance"))
+	float LaserWarningDescentDistance = 300.0f;
+
+	/** Time used to reach the lowered laser firing height. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Laser Attack",
+		meta = (ClampMin = "0.01", DisplayName = "Laser Warning Descent Duration"))
+	float LaserWarningDescentDuration = 0.6f;
+
+	/** Time used to return to the normal flying height during recovery. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Laser Attack",
+		meta = (ClampMin = "0.01", DisplayName = "Laser Recovery Ascent Duration"))
+	float LaserRecoveryAscentDuration = 0.6f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Laser Attack",
 		meta = (ClampMin = "1"))
@@ -328,6 +348,14 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Shockwave",
 		meta = (ClampMin = "1"))
 	int32 ShockwaveDamage = 1;
+
+	/**
+	 * Optional level-space center for the shockwave. When assigned, this takes
+	 * priority over the ShockwaveOrigin component on the Boss, so a flying or
+	 * descending Boss never moves the ground attack's visible ring or damage.
+	 */
+	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "Boss|Encounter|Shockwave")
+	TObjectPtr<AActor> ShockwaveWorldAnchor;
 
 	/** Material used by the runtime-generated fire ring during its warning. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Shockwave|Fire Visual")
@@ -426,6 +454,10 @@ private:
 	void UpdateBossFacing(float DeltaTime);
 	void UpdateLaserWarning();
 	void LockLaserSweep();
+	void ConfigureLaserSweepAtPauseEnd();
+	void BeginLaserVerticalMovement();
+	void UpdateLaserVerticalMovement();
+	void RestoreBossLaserHeight();
 	USceneComponent* FindNamedSceneComponent(FName ComponentName) const;
 	FVector GetProjectileOriginLocation() const;
 	FVector GetLaserOriginLocation() const;
@@ -459,9 +491,10 @@ private:
 	FRandomStream AttackRandomStream;
 	int32 ActiveAttackRandomSeed = 0;
 	FVector LockedTargetLocation = FVector::ZeroVector;
-	FVector LaserWarningInitialPlayerLocation = FVector::ZeroVector;
 	float LaserWarningCurrentYaw = 0.0f;
 	bool bLaserAimLocked = false;
+	float LaserBaseActorZ = 0.0f;
+	bool bLaserHeightAdjusted = false;
 	float StateElapsed = 0.0f;
 	float PreviousShockwaveRadius = 0.0f;
 	bool bPlayerDamagedThisAttack = false;

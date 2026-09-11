@@ -18,12 +18,29 @@ class RDCA_API AArenaIntroDirector : public AActor
 
 public:
 	AArenaIntroDirector();
+	virtual void Tick(float DeltaTime) override;
 
 protected:
 	virtual void BeginPlay() override;
 
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Arena Intro|Setup")
 	TObjectPtr<AActor> BossActor;
+
+	/**
+	 * Place an Empty Actor at the desired final world transform of the flying
+	 * Boss. It avoids tying combat height to a particular dragon mesh pivot.
+	 */
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Arena Intro|Boss Descent")
+	TObjectPtr<AActor> BossCombatHoverTarget;
+
+	/** Smoothly lower the Boss from its takeoff position before combat begins. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Intro|Boss Descent")
+	bool bDescendBossAfterTakeoff = true;
+
+	/** Time from the takeoff's final pose to the configured combat hover point. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Intro|Boss Descent",
+		meta = (ClampMin = "0.0"))
+	float BossDescentDuration = 1.8f;
 
 	/** The Phase-1 Cyber centre disc beneath the Dragon. */
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Arena Intro|Setup")
@@ -53,10 +70,16 @@ private:
 	void LockPlayer();
 	void UnlockPlayer();
 	void ShatterCyberCenter();
+	void BeginBossDescent();
+	void TickBossDescent(float DeltaTime);
 	void CompleteIntro();
 
 	TWeakObjectPtr<UBossAnimationComponent> BossAnimation;
 	TArray<TWeakObjectPtr<AAnchorSpawnManager>> AnchorManagers;
 	bool bCyberCenterShattered = false;
 	bool bIntroCompleted = false;
+	bool bBossDescentActive = false;
+	FVector BossDescentStart = FVector::ZeroVector;
+	FVector BossDescentEnd = FVector::ZeroVector;
+	float BossDescentElapsed = 0.0f;
 };
