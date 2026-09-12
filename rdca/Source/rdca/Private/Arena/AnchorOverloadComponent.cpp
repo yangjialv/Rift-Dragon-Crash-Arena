@@ -2,11 +2,13 @@
 
 #include "Arena/AttachSurfaceComponent.h"
 #include "Arena/AnchorSpawnManager.h"
+#include "Arena/ArenaPhaseController.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/Pawn.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "EngineUtils.h"
 #include "Player/PhaseCrashComponent.h"
 #include "Player/PlayerHealthComponent.h"
 #include "rdca.h"
@@ -51,13 +53,8 @@ void UAnchorOverloadComponent::BeginPlay()
 			AnchorVisual.IsValid() ? TEXT("found") : TEXT("missing"));
 	}
 
-	ApplyAnchorMaterial(NormalMaterial);
-	if (AnchorVisual.IsValid())
-	{
-		OverloadMaterialInstance =
-			AnchorVisual->CreateDynamicMaterialInstance(0);
-		UpdateOverloadMaterial(0.0f);
-	}
+	ResolvePhaseController();
+	UpdatePhaseVisual();
 }
 
 void UAnchorOverloadComponent::TickComponent(
@@ -66,6 +63,7 @@ void UAnchorOverloadComponent::TickComponent(
 	FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	UpdatePhaseVisual();
 
 	if (OverloadState == EAnchorOverloadState::Recovering)
 	{
@@ -284,15 +282,6 @@ void UAnchorOverloadComponent::SetAnchorAvailable(const bool bAvailable)
 	}
 }
 
-void UAnchorOverloadComponent::ApplyAnchorMaterial(
-	UMaterialInterface* Material)
-{
-	if (AnchorVisual.IsValid() && Material)
-	{
-		AnchorVisual->SetMaterial(0, Material);
-	}
-}
-
 void UAnchorOverloadComponent::UpdateOverloadMaterial(
 	const float OverloadAlpha)
 {
@@ -302,4 +291,46 @@ void UAnchorOverloadComponent::UpdateOverloadMaterial(
 			TEXT("OverloadAlpha"),
 			FMath::Clamp(OverloadAlpha, 0.0f, 1.0f));
 	}
+}
+
+void UAnchorOverloadComponent::ResolvePhaseController()
+{
+	if (PhaseController.IsValid() || !GetWorld())
+	{
+		return;
+	}
+	for (TActorIterator<AArenaPhaseController> It(GetWorld()); It; ++It)
+	{
+		PhaseController = *It;
+		break;
+	}
+}
+
+void UAnchorOverloadComponent::UpdatePhaseVisual()
+{
+	if (!AnchorVisual.IsValid() || !GetOwner())
+	{
+		return;
+	}
+	ResolvePhaseController();
+	const bool bUseCodeColor = PhaseController.IsValid()
+		&& PhaseController->IsSourceCodePhaseAtLocation(
+			GetOwner()->GetActorLocation());
+	if (bHasAppliedPhaseVisual
+		&& bCodePhaseVisualApplied == bUseCodeColor)
+	{
+		return;
+	}
+
+	UMaterialInterface* DesiredMaterial = bUseCodeColor
+		? CodePhaseMaterial.Get()
+		: CyberPhaseMaterial.Get();
+	if (DesiredMaterial)
+	{
+		AnchorVisual->SetMaterial(0, DesiredMaterial);
+	}
+	OverloadMaterialInstance = AnchorVisual->CreateDynamicMaterialInstance(0);
+	UpdateOverloadMaterial(CurrentOverloadAlpha);
+	bCodePhaseVisualApplied = bUseCodeColor;
+	bHasAppliedPhaseVisual = true;
 }

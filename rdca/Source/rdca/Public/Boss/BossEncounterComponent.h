@@ -14,8 +14,10 @@ class UBoxComponent;
 class UPrimitiveComponent;
 class UProceduralMeshComponent;
 class AActor;
+class APawn;
 class ABossFanProjectile;
 class ABossSweepLaser;
+enum class EBossProjectileMotionMode : uint8;
 
 UENUM(BlueprintType)
 enum class EBossEncounterState : uint8
@@ -53,6 +55,27 @@ enum class EPlayerSpatialState : uint8
 	Grounded,
 	Airborne,
 	Attached
+};
+
+UENUM(BlueprintType)
+enum class EBossBarragePattern : uint8
+{
+	PredictiveVolley UMETA(DisplayName = "Predictive Triple Volley"),
+	GapWall UMETA(DisplayName = "Gap Barrage Wall"),
+	CurvedVolley UMETA(DisplayName = "Curved Spin Volley"),
+	HomingVolley UMETA(DisplayName = "Limited Homing Volley"),
+	RotatingGapWall UMETA(DisplayName = "Rotating Gap Barrage"),
+	DoubleSpiral UMETA(DisplayName = "Double Spiral Barrage"),
+	LegacyAimedVolley UMETA(DisplayName = "Legacy Aimed Volley"),
+	LegacyDenseFan UMETA(DisplayName = "Legacy Dense Fan")
+};
+
+UENUM(BlueprintType)
+enum class EBossPhase2Sequence : uint8
+{
+	DoubleShockwave UMETA(DisplayName = "Double Shockwave"),
+	BarrageLaser UMETA(DisplayName = "Barrage Into Laser"),
+	SpecialBarrage UMETA(DisplayName = "Special Barrage Finale")
 };
 
 USTRUCT(BlueprintType)
@@ -186,6 +209,15 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Debug")
 	bool bDebugForceSweepLaser = false;
 
+	/** Repeats only the selected barrage pattern for isolated tuning. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Debug")
+	bool bDebugForceBarrage = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Debug",
+		meta = (EditCondition = "bDebugForceBarrage"))
+	EBossBarragePattern DebugBarragePattern =
+		EBossBarragePattern::PredictiveVolley;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Selection")
 	FBossAttackWeights GroundedAttackWeights;
 
@@ -203,27 +235,9 @@ protected:
 		meta = (ClampMin = "0.1"))
 	float AimedVolleyAttackDuration = 0.6f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Aimed Volley",
-		meta = (ClampMin = "1", ClampMax = "9"))
-	int32 PrecisionVolleyProjectileCount = 5;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Aimed Volley",
-		meta = (ClampMin = "0.01"))
-	float PrecisionVolleyShotInterval = 0.16f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Aimed Volley",
-		meta = (ClampMin = "0.0"))
-	float PrecisionVolleyLateralSpacing = 110.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Aimed Volley",
-		meta = (ClampMin = "1.0"))
-	float AimedVolleyProjectileSpeed = 1500.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Aimed Volley",
-		meta = (ClampMin = "1"))
-	int32 AimedVolleyProjectileDamage = 1;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Aimed Volley")
+	/** The one projectile Blueprint used by all eight barrage patterns. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Common",
+		meta = (DisplayName = "Barrage Projectile Class"))
 	TSubclassOf<ABossFanProjectile> FanProjectileClass;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Barrage",
@@ -234,33 +248,143 @@ protected:
 		meta = (ClampMin = "0.1"))
 	float FanBarrageAttackDuration = 0.75f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Barrage",
-		meta = (ClampMin = "3", ClampMax = "31"))
-	int32 DenseFanProjectileCount = 21;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Barrage",
-		meta = (ClampMin = "1.0", ClampMax = "170.0"))
-	float DenseFanArcDegrees = 100.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Barrage",
-		meta = (ClampMin = "0.01"))
-	float DenseFanShotInterval = 0.035f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Barrage",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Common",
 		meta = (ClampMin = "1.0"))
-	float DenseFanProjectileSpeed = 1250.0f;
+	float BarrageProjectileSpeed = 1600.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Barrage",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Common",
 		meta = (ClampMin = "1"))
-	int32 FanBarrageProjectileDamage = 1;
+	int32 BarrageProjectileDamage = 1;
 
-	/** Optional visual variant. Falls back to FanProjectileClass when unset. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Fan Barrage")
-	TSubclassOf<ABossFanProjectile> FanBarrageProjectileClass;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Predictive")
+	int32 PredictiveWaveCount = 3;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Predictive")
+	int32 PredictiveProjectilesPerWave = 3;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Predictive")
+	float PredictiveWaveInterval = 0.35f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Predictive")
+	float PredictiveLeadTime = 0.45f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Predictive")
+	float PredictiveLateralSpacing = 110.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Gap Wall")
+	int32 GapWallWaveCount = 2;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Gap Wall")
+	int32 GapWallProjectileCount = 19;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Gap Wall")
+	int32 GapWallSkippedProjectileCount = 3;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Gap Wall")
+	float GapWallArcDegrees = 140.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Gap Wall")
+	float GapWallWaveInterval = 0.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Curved")
+	int32 CurvedWaveCount = 2;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Curved")
+	int32 CurvedProjectilesPerWave = 7;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Curved")
+	float CurvedArcDegrees = 75.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Curved")
+	float CurvedWaveInterval = 0.45f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Curved")
+	float CurveDegreesPerSecond = 40.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Curved")
+	float MaximumCurveDegrees = 80.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Homing")
+	int32 HomingProjectileCount = 3;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Homing")
+	float HomingSpreadDegrees = 28.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Homing")
+	float HomingProjectileSpeed = 1100.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Homing")
+	float HomingTurnDegreesPerSecond = 70.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Homing")
+	float HomingDuration = 1.2f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Homing")
+	float HomingStopDistance = 350.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Homing")
+	float MaximumHomingAngle = 100.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Rotating Gap")
+	int32 RotatingGapWaveCount = 5;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Rotating Gap")
+	float RotatingGapDegreesPerWave = 24.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Double Spiral")
+	int32 DoubleSpiralPairCount = 12;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Double Spiral")
+	float DoubleSpiralPairInterval = 0.10f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Double Spiral")
+	float DoubleSpiralDegreesPerPair = 9.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Legacy Aimed",
+		meta = (ClampMin = "1"))
+	int32 LegacyAimedProjectileCount = 5;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Legacy Aimed",
+		meta = (ClampMin = "0.01"))
+	float LegacyAimedShotInterval = 0.16f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Legacy Aimed",
+		meta = (ClampMin = "0.0"))
+	float LegacyAimedLateralSpacing = 110.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Legacy Aimed",
+		meta = (ClampMin = "1.0"))
+	float LegacyAimedProjectileSpeed = 1500.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Legacy Dense Fan",
+		meta = (ClampMin = "3"))
+	int32 LegacyDenseFanProjectileCount = 21;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Legacy Dense Fan",
+		meta = (ClampMin = "1.0", ClampMax = "179.0"))
+	float LegacyDenseFanArcDegrees = 100.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Legacy Dense Fan",
+		meta = (ClampMin = "0.01"))
+	float LegacyDenseFanShotInterval = 0.035f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Legacy Dense Fan",
+		meta = (ClampMin = "1.0"))
+	float LegacyDenseFanProjectileSpeed = 1250.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Phase 2",
 		meta = (ClampMin = "0.1"))
 	float Phase2InterAttackDelay = 0.65f;
+
+	/** Boss enters Phase 2 as soon as its HP reaches this value. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Phase 2",
+		meta = (ClampMin = "1", DisplayName = "Phase 2 Start Hit Points"))
+	int32 Phase2StartHitPoints = 3;
+
+	/** Recovery gap after the first Phase 2 shockwave, before the second warning begins. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Phase 2",
+		meta = (ClampMin = "0.0", DisplayName = "Double Shockwave Gap"))
+	float Phase2DoubleShockwaveGap = 0.8f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Phase 2",
 		meta = (ClampMin = "0.1"))
@@ -443,11 +567,39 @@ private:
 		bool bFromSweep,
 		const FHitResult& SweepResult);
 	void UpdateWeakPointVisual(bool bExposed);
+
+	UFUNCTION()
+	void HandleWeakPointCrash(
+		APawn* CrashingPawn,
+		bool bWasEffective,
+		const FHitResult& Hit);
+
 	float GetCurrentStateDuration() const;
-	void TickAimedVolley(float DeltaTime);
-	void SpawnAimedVolleyProjectile(int32 ShotIndex);
-	void TickFanBarrage(float DeltaTime);
-	void SpawnFanBarrageProjectile(int32 ShotIndex);
+	int32 GetEffectivePhase2StartHitPoints() const;
+	float GetPhase2InterAttackDelay() const;
+	void SelectPhase1ScheduledAttack();
+	void SetBarragePattern(EBossBarragePattern Pattern);
+	void BeginBarrageAttack();
+	void TickBarrage(float DeltaTime);
+	void SpawnBarrageStep(int32 StepIndex);
+	void SpawnPredictiveWave(int32 WaveIndex);
+	void SpawnGapWallWave(int32 WaveIndex, bool bRotateGap);
+	void SpawnCurvedWave(int32 WaveIndex);
+	void SpawnHomingWave();
+	void SpawnDoubleSpiralPair(int32 PairIndex);
+	void SpawnLegacyAimedProjectile(int32 ShotIndex);
+	void SpawnLegacyDenseFanProjectile(int32 ShotIndex);
+	void SpawnSharedBarrageProjectile(
+		const FVector& Direction,
+		float Speed,
+		EBossProjectileMotionMode MotionMode,
+		float CurveRate = 0.0f,
+		float MaxCurve = 0.0f,
+		AActor* HomingTarget = nullptr);
+	int32 GetBarrageStepCount() const;
+	float GetBarrageStepInterval() const;
+	float GetBarrageAttackDuration() const;
+	bool IsWideBarragePattern(EBossBarragePattern Pattern) const;
 	void SelectPhase2Combo();
 	void BeginPhase2SecondAttack();
 	void SpawnLaserWarning();
@@ -503,14 +655,19 @@ private:
 	bool bEncounterStopped = false;
 	bool bIntroHold = false;
 	int32 CompletedAttacksSinceExposure = 0;
-	int32 AimedVolleyShotsFired = 0;
-	float AimedVolleyShotElapsed = 0.0f;
-	int32 FanBarrageShotsFired = 0;
-	float FanBarrageShotElapsed = 0.0f;
+	EBossBarragePattern ActiveBarragePattern =
+		EBossBarragePattern::PredictiveVolley;
+	int32 BarrageStepsFired = 0;
+	float BarrageStepElapsed = 0.0f;
 	bool bPhase2ComboActive = false;
-	bool bPhase2AnchorPressureCombo = false;
-	bool bHasSelectedPhase2Combo = false;
-	bool bPreviousPhase2AnchorPressureCombo = false;
+	EBossPhase2Sequence ActivePhase2Sequence =
+		EBossPhase2Sequence::DoubleShockwave;
 	int32 Phase2ComboStep = 0;
+	EBossBarragePattern PreviousBarragePattern =
+		EBossBarragePattern::PredictiveVolley;
+	bool bHasPreviousBarragePattern = false;
+	EBossBarragePattern PreviousSpecialOpeningPattern =
+		EBossBarragePattern::CurvedVolley;
+	bool bHasPreviousSpecialOpeningPattern = false;
 	TWeakObjectPtr<ABossSweepLaser> ActiveSweepLaser;
 };

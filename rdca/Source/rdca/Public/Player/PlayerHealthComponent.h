@@ -77,7 +77,7 @@ public:
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Health",
 		meta = (ClampMin = "1"))
-	int32 MaximumHealth = 3;
+	int32 MaximumHealth = 5;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Health",
 		meta = (ClampMin = "0.0"))
@@ -109,7 +109,7 @@ private:
 	void PlayDamageFeedback(int32 DamageAmount);
 	void SetHitFlashValue(float Value);
 
-	int32 CurrentHealth = 3;
+	int32 CurrentHealth = 5;
 	float InvulnerabilityRemaining = 0.0f;
 	float HitFlashRemaining = 0.0f;
 	UPROPERTY(Transient)

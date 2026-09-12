@@ -130,14 +130,29 @@ void AArenaPhaseController::Tick(const float DeltaTime)
 	UpdateMaterialSphere();
 	UpdateExpansionWaveVisual(true);
 
-	if (!bUseMaterialSphereMask)
+	for (FPhaseActorPair& Pair : MappedPairs)
 	{
-		for (FPhaseActorPair& Pair : MappedPairs)
+		if (Pair.bRevealed)
 		{
-			if (!Pair.bRevealed && CurrentRadius >= GetRevealRadius(Pair))
+			continue;
+		}
+
+		// A sky sphere is centred on the arena and surrounds the whole level, so
+		// neither its pivot distance nor the world-space material mask provides a
+		// useful reveal threshold. Switch the paired skies at a clear point in the
+		// phase-transition timeline instead.
+		if (IsSkyPair(Pair))
+		{
+			if (Alpha >= FMath::Clamp(SkySwitchProgress, 0.0f, 1.0f))
 			{
 				RevealPair(Pair);
 			}
+			continue;
+		}
+
+		if (!bUseMaterialSphereMask && CurrentRadius >= GetRevealRadius(Pair))
+		{
+			RevealPair(Pair);
 		}
 	}
 
@@ -180,7 +195,7 @@ void AArenaPhaseController::StartPhaseTransition()
 	{
 		for (const FPhaseActorPair& Pair : MappedPairs)
 		{
-			if (Pair.SourceActor.IsValid())
+			if (!IsSkyPair(Pair) && Pair.SourceActor.IsValid())
 			{
 				Pair.SourceActor->SetActorHiddenInGame(false);
 			}
@@ -210,6 +225,20 @@ void AArenaPhaseController::StartPhaseTransition()
 	UpdateExpansionWaveVisual(true);
 	UE_LOG(LogRDCAPlayer, Log, TEXT("Arena phase transition started. Origin=%s Radius=%.0f Duration=%.2f"),
 		*PhaseOrigin.ToCompactString(), MaximumRadius, ActiveExpansionDuration);
+}
+
+bool AArenaPhaseController::IsSourceCodePhaseAtLocation(
+	const FVector WorldLocation) const
+{
+	if (bTransitionComplete)
+	{
+		return true;
+	}
+	if (!bTransitionActive)
+	{
+		return false;
+	}
+	return FVector::Dist(PhaseOrigin, WorldLocation) <= CurrentRadius;
 }
 
 void AArenaPhaseController::ResolveReferences()
@@ -471,4 +500,9 @@ float AArenaPhaseController::GetRevealRadius(const FPhaseActorPair& Pair) const
 bool AArenaPhaseController::IsRingPair(const FPhaseActorPair& Pair) const
 {
 	return Pair.MappingTag == RingMappingTag;
+}
+
+bool AArenaPhaseController::IsSkyPair(const FPhaseActorPair& Pair) const
+{
+	return Pair.MappingTag == SkyMappingTag;
 }

@@ -35,6 +35,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Arena Phase")
 	float GetExpansionRadius() const { return CurrentRadius; }
 
+	/** True when the expanding Source Code sphere has reached this world position. */
+	UFUNCTION(BlueprintPure, Category = "Arena Phase")
+	bool IsSourceCodePhaseAtLocation(FVector WorldLocation) const;
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -54,7 +58,7 @@ protected:
 
 	/** Debug only: play the Cyber Rift -> Source Code Void reveal immediately after level load. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Phase|Debug")
-	bool bDebugAutoStartTransitionOnBeginPlay = true;
+	bool bDebugAutoStartTransitionOnBeginPlay = false;
 
 	/** Briefly keep the initial Cyber Rift visible before the debug transition starts. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Phase|Debug",
@@ -85,6 +89,15 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Phase|Tags")
 	FName RingMappingTag = TEXT("PhaseMap_RingFloor");
+
+	/** Paired sky actors switch by transition progress instead of world distance. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Phase|Tags")
+	FName SkyMappingTag = TEXT("PhaseMap_Sky");
+
+	/** Normalized expansion progress at which the Cyber sky is replaced by the Code sky. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Phase|Timing",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float SkySwitchProgress = 0.5f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Phase|Tags")
 	FName CyberVisualTag = TEXT("CyberRiftVisual");
@@ -145,6 +158,7 @@ private:
 	void SetActorCollision(AActor* Actor, bool bEnabled) const;
 	float GetRevealRadius(const FPhaseActorPair& Pair) const;
 	bool IsRingPair(const FPhaseActorPair& Pair) const;
+	bool IsSkyPair(const FPhaseActorPair& Pair) const;
 
 	TWeakObjectPtr<UBossEncounterComponent> BossEncounter;
 	TArray<FPhaseActorPair> MappedPairs;

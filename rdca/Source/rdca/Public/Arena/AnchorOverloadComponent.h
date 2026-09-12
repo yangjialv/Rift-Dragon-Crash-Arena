@@ -5,6 +5,7 @@
 #include "AnchorOverloadComponent.generated.h"
 
 class APawn;
+class AArenaPhaseController;
 class UAttachSurfaceComponent;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
@@ -83,11 +84,11 @@ protected:
 		meta = (ClampMin = "1"))
 	int32 OverloadDamage = 1;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anchor|Visual")
-	TObjectPtr<UMaterialInterface> NormalMaterial;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anchor|Visual|Phase")
+	TObjectPtr<UMaterialInterface> CyberPhaseMaterial;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anchor|Visual")
-	TObjectPtr<UMaterialInterface> WarningMaterial;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anchor|Visual|Phase")
+	TObjectPtr<UMaterialInterface> CodePhaseMaterial;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anchor|Fracture")
 	TSubclassOf<AActor> FractureActorClass;
@@ -97,15 +98,19 @@ private:
 	void TriggerOverload(bool bDamageAttachedPlayer);
 	void FinishRecovery();
 	void SetAnchorAvailable(bool bAvailable);
-	void ApplyAnchorMaterial(UMaterialInterface* Material);
 	void UpdateOverloadMaterial(float OverloadAlpha);
+	void ResolvePhaseController();
+	void UpdatePhaseVisual();
 
 	TWeakObjectPtr<APawn> AttachedPlayer;
 	TWeakObjectPtr<UAttachSurfaceComponent> AttachSurface;
 	TWeakObjectPtr<UStaticMeshComponent> AnchorVisual;
+	TWeakObjectPtr<AArenaPhaseController> PhaseController;
 	TWeakObjectPtr<AActor> SpawnedFractureActor;
 	TObjectPtr<UMaterialInstanceDynamic> OverloadMaterialInstance;
 	EAnchorOverloadState OverloadState = EAnchorOverloadState::Normal;
 	float CurrentOverloadAlpha = 0.0f;
 	float StateElapsed = 0.0f;
+	bool bCodePhaseVisualApplied = false;
+	bool bHasAppliedPhaseVisual = false;
 };

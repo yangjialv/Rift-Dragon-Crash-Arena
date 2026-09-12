@@ -45,9 +45,11 @@ Run `tools/parse_combat_log.py` against the latest Unreal log to generate this r
 ## Manual Test: Boss Phase 1 Decision State Machine
 
 - [ ] HUD distinguishes Preparing, Attacking, Recovery, and Weak Point Exposed.
-- [ ] The same attack is never selected twice in succession.
-- [ ] A grounded player increases the frequency of Shockwave and AimedVolley.
-- [ ] An attached player increases the frequency of SweepLaser.
+- [ ] Player and Boss both start with 5 HP.
+- [ ] Phase 1 round one is Legacy Aimed Volley, then one Shockwave.
+- [ ] Phase 1 round two starts with Predictive Volley or Gap Wall, then Sweep Laser.
+- [ ] Missing a Phase 1 round-two weak-point window swaps its first barrage option when possible.
+- [ ] Curved, Homing, Rotating Gap, Double Spiral, and Legacy Dense Fan never enter the formal Phase 1 schedule.
 - [ ] AimedVolley and Laser keep the target selected at the start of their warning.
 - [ ] Moving during the warning does not retarget the attack.
 - [ ] The weak point is exposed after two completed attacks, not after every attack.
@@ -56,21 +58,26 @@ Run `tools/parse_combat_log.py` against the latest Unreal log to generate this r
 - [ ] Holding crash during cooldown starts aiming on the first available frame.
 - [ ] Releasing crash before cooldown completes cancels the buffered request.
 - [ ] A dash pressed shortly before availability executes once and is not repeated.
-- [ ] AimedVolley fires three faster projectiles toward the locked center/left/right targets.
-- [ ] Logs contain phase, player spatial state, weights, previous attack, selected attack, and seed.
+- [ ] One effective crash consumes the current weak-point window, preventing multiple HP losses in one exposure.
+- [ ] The final attack of every round enters Weak Point Exposed immediately; no general Recovery delay plays between the attack montage and stun montage.
+- [ ] A left-click launch becomes Ready immediately after landing on Arena Floor Collision, while right-click ground dash still observes Ground Dash Cooldown.
+- [ ] Anchors are blue-purple before the phase sphere reaches them and green afterwards; Phase 1 projectiles are blue and Phase 2 projectiles are red.
+- [ ] Logs contain round, step, player spatial state, previous attack, selected attack, barrage pattern, and seed.
 
 ## Manual Test: Boss Phase 2 Combos
 
-- [ ] Reducing Boss HP to `1` enters Phase 2 only after the current weak-point window ends.
-- [ ] A grounded player selects Ground Pressure: Shockwave, input gap, then AimedVolley.
-- [ ] An attached player selects Anchor Pressure: FanBarrage, input gap, then SweepLaser.
-- [ ] After the first Phase 2 combo, both combos alternate even if the player stays grounded.
-- [ ] FanBarrage fires 13 projectiles across a dense 90-degree arc.
+- [ ] Reducing Boss HP from 4 to 3 starts the Phase 2 arena transition immediately.
+- [ ] The first Phase 2 round executes Shockwave, a configurable gap, then a second fully warned Shockwave.
+- [ ] Each Phase 2 Shockwave resets its own one-hit damage guard and can damage the player independently.
+- [ ] The second Phase 2 round executes Rotating Gap or Legacy Dense Fan, then Sweep Laser.
+- [ ] The third Phase 2 round executes Curved or Limited Homing, then Double Spiral.
+- [ ] Missing a weak-point window repeats the same HP round without advancing Boss health.
 - [ ] Both attacks in a combo use the target locked when the combo was selected.
-- [ ] The `0.65` second inter-attack gap leaves one clear movement-input opportunity.
+- [ ] The `0.8` second double-Shockwave gap plus the second warning leaves a valid jump-input opportunity.
+- [ ] The `0.65` second barrage-combo gap leaves one clear movement-input opportunity.
 - [ ] Completing the second attack always exposes the weak point.
-- [ ] Phase 2 weak-point exposure lasts approximately `2.25` seconds.
-- [ ] HUD displays `FAN BARRAGE` during warning and active states.
+- [ ] Phase 2 weak-point exposure lasts approximately `4.5` seconds with the default `2.0` stun multiplier.
+- [ ] Boss requires three Phase 2 weak-point hits before reaching zero HP.
 - [ ] Victory during or after a combo removes all remaining projectile and laser actors.
 
 ## Manual Test: Boss Facing and Attack Pressure
@@ -138,6 +145,7 @@ Run `tools/parse_combat_log.py` against the latest Unreal log to generate this r
 - [ ] Each `PhaseMap_PillarXX` pair switches only when the expansion radius reaches its placement distance.
 - [ ] The visual ring swap never changes collision; the player remains supported by the dedicated Floor Disc.
 - [ ] At the end, all Source Code Void actors are visible, all Cyber Rift actors are hidden, and combat resumes once.
+- [ ] `PhaseMap_Sky` pairs `cyber_sky` and `code_sky`: only Cyber is visible at startup, and the pair switches once at `SkySwitchProgress` even when the material sphere mask is enabled.
 - [ ] With `bUseMaterialSphereMask` disabled, the object-level transition is correct and needs no material setup.
 - [ ] With a configured `MPC_ArenaPhase` and matching environment materials, the visible boundary is a sphere centred on `ArenaPhaseOrigin`.
 

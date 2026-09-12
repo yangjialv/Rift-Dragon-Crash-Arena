@@ -265,6 +265,7 @@ void UPhaseCrashComponent::ReleaseCrash()
 	CrashElapsed = 0.0f;
 	VerticalVelocity = 0.0f;
 	ActiveCooldownDuration = CooldownDuration;
+	bCurrentCrashRefreshesOnLanding = true;
 	SetCrashState(EPhaseCrashState::Crashing);
 	if (DepartureAnchor.IsValid())
 	{
@@ -366,6 +367,7 @@ void UPhaseCrashComponent::StartGroundDash()
 		TravelDistance / FMath::Max(GroundDashSpeed, 1.0f),
 		MinimumFlightDuration);
 	ActiveCooldownDuration = GroundDashCooldown;
+	bCurrentCrashRefreshesOnLanding = false;
 	VerticalVelocity = 0.0f;
 
 	SetCrashState(EPhaseCrashState::Crashing);
@@ -414,6 +416,7 @@ void UPhaseCrashComponent::ForceArenaRecovery(
 	CrashElapsed = 0.0f;
 	CrashDuration = FMath::Max(Duration, MinimumFlightDuration);
 	ActiveCooldownDuration = GroundDashCooldown;
+	bCurrentCrashRefreshesOnLanding = false;
 	VerticalVelocity = 0.0f;
 	SetCrashState(EPhaseCrashState::Crashing);
 
@@ -913,6 +916,19 @@ void UPhaseCrashComponent::ApplyGravity(const float DeltaTime)
 			return;
 		}
 		VerticalVelocity = 0.0f;
+		if (bRefreshJumpCooldownOnArenaLanding
+			&& bCurrentCrashRefreshesOnLanding
+			&& Cast<AArenaFloorCollision>(HitActor)
+			&& Hit.ImpactNormal.Z >= 0.5f
+			&& (CrashState == EPhaseCrashState::Recovery
+				|| CrashState == EPhaseCrashState::Cooldown))
+		{
+			RecoveryRemaining = 0.0f;
+			CooldownRemaining = 0.0f;
+			ActiveCooldownDuration = 0.0f;
+			bCurrentCrashRefreshesOnLanding = false;
+			SetCrashState(EPhaseCrashState::Ready);
+		}
 	}
 }
 

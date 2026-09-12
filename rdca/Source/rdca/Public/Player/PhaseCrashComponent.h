@@ -223,6 +223,10 @@ protected:
 		meta = (ClampMin = "0.0"))
 	float CooldownDuration = 0.45f;
 
+	/** A left-click launch becomes ready as soon as it lands on Arena Floor Collision. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Timing")
+	bool bRefreshJumpCooldownOnArenaLanding = true;
+
 	/** Visual-only impact-to-ejection time after any Rebound collision. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Presentation",
 		meta = (ClampMin = "0.01"))
@@ -304,6 +308,7 @@ private:
 	bool bAimingAtBoss = false;
 	bool bActiveBossCrash = false;
 	bool bWeakPointDamageAppliedThisCrash = false;
+	bool bCurrentCrashRefreshesOnLanding = false;
 	bool bCrashInputHeld = false;
 	bool bCrashInputBuffered = false;
 	float DashInputBufferRemaining = 0.0f;

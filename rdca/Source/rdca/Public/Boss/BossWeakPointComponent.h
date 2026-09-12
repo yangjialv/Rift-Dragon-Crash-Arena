@@ -85,7 +85,7 @@ public:
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Weak Point",
 		meta = (ClampMin = "1"))
-	int32 MaximumHitPoints = 3;
+	int32 MaximumHitPoints = 5;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Weak Point")
 	bool bExposed = true;
@@ -95,5 +95,5 @@ protected:
 	int32 DamagePerQualifiedCrash = 1;
 
 private:
-	int32 CurrentHitPoints = 3;
+	int32 CurrentHitPoints = 5;
 };

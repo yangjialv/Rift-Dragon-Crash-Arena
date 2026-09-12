@@ -15,7 +15,7 @@
 
 namespace
 {
-AArenaFloorCollision* FindArenaFloorCollision(UWorld* World)
+AArenaFloorCollision* FindLaserArenaFloorCollision(UWorld* World)
 {
 	if (!World)
 	{
@@ -302,7 +302,7 @@ bool ABossSweepLaser::IsActorInsideWarningArea(
 		GroundWarningLength,
 		1.0f);
 	float EffectiveLength = ConfiguredWarningLength;
-	if (const AArenaFloorCollision* Floor = FindArenaFloorCollision(GetWorld()))
+	if (const AArenaFloorCollision* Floor = FindLaserArenaFloorCollision(GetWorld()))
 	{
 		const float WarningHalfWidth = FMath::Max(
 			GroundWarningWidth * 0.5f,
@@ -493,7 +493,7 @@ void ABossSweepLaser::UpdateGroundWarningVisual()
 	const float WarningHalfWidth = FMath::Max(
 		GroundWarningWidth * 0.5f,
 		0.5f);
-	if (const AArenaFloorCollision* Floor = FindArenaFloorCollision(GetWorld()))
+	if (const AArenaFloorCollision* Floor = FindLaserArenaFloorCollision(GetWorld()))
 	{
 		float FloorStartDistance = 0.0f;
 		float AvailableFloorLength = 0.0f;
