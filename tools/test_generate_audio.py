@@ -13,7 +13,7 @@ class GenerationTests(unittest.TestCase):
         self.config = audio.load_assets()
 
     def test_manifest_and_prompts(self):
-        self.assertEqual(len(self.config["assets"]), 42)
+        self.assertEqual(len(self.config["assets"]), 41)
         self.assertTrue(all(a["resolved_prompt"] for a in self.config["assets"]))
         self.assertEqual(len(self.config["samples"]), 4)
         for asset in self.config["assets"]:
@@ -33,14 +33,9 @@ class GenerationTests(unittest.TestCase):
     def test_samples_duration_floor(self):
         samples = [a for a in self.config["assets"] if a["name"] in self.config["samples"]]
         durations = [audio.request_body(a, self.config)[1]["duration_seconds"] for a in samples]
-        self.assertEqual(durations, [1.6, 5.0, 3.5, 2.2])
+        self.assertEqual(durations, [2.4, 5.0, 3.5, 2.2])
 
-    def test_music_instrumental_and_loop_sfx(self):
-        music = next(a for a in self.config["assets"] if a["kind"] == "music")
-        endpoint, body = audio.request_body(music, self.config)
-        self.assertEqual(endpoint, "/v1/music")
-        self.assertTrue(body["force_instrumental"])
-        self.assertEqual(body["music_length_ms"], 75000)
+    def test_loop_sfx(self):
         loop = next(a for a in self.config["assets"] if a["name"] == "SFX_Laser_Loop")
         self.assertTrue(audio.request_body(loop, self.config)[1]["loop"])
 
@@ -74,7 +69,7 @@ class GenerationTests(unittest.TestCase):
         argv = ["generate_audio.py", "--batch", "first", "--exclude-samples"]
         with patch("sys.argv", argv), patch("sys.stdout", new_callable=io.StringIO) as output:
             audio.main()
-        self.assertIn("Selected 22 candidates", output.getvalue())
+        self.assertIn("Selected 23 candidates", output.getvalue())
         self.assertNotIn("SFX_Boss_Takeoff:", output.getvalue())
         self.assertNotIn("SFX_Boss_Roar:", output.getvalue())
         self.assertNotIn("SFX_WeakPoint_Hit:", output.getvalue())

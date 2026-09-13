@@ -38,7 +38,8 @@ enum class ERDCAAudioCue : uint8
 	PhaseTransitionEnd,
 	BossDeath,
 	Victory,
-	Defeat
+	Defeat,
+	BossMusicMain
 };
 
 /**
@@ -61,6 +62,13 @@ namespace RDCAAudio
 		ERDCAAudioCue Cue,
 		float Volume = 0.65f,
 		float Pitch = 1.0f);
+
+	RDCA_API UAudioComponent* Spawn2D(
+		const UObject* WorldContextObject,
+		ERDCAAudioCue Cue,
+		float Volume = 0.65f,
+		float Pitch = 1.0f,
+		bool bLoop = false);
 
 	RDCA_API UAudioComponent* SpawnLoopAttached(
 		ERDCAAudioCue Cue,

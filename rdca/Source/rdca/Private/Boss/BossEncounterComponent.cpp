@@ -93,9 +93,7 @@ int32 UBossEncounterComponent::GetEffectivePhase2StartHitPoints() const
 
 float UBossEncounterComponent::GetPhase2InterAttackDelay() const
 {
-	return ActivePhase2Sequence == EBossPhase2Sequence::DoubleShockwave
-		? FMath::Max(Phase2DoubleShockwaveGap, 0.0f)
-		: FMath::Max(Phase2InterAttackDelay, 0.0f);
+	return FMath::Max(Phase2InterAttackDelay, 0.0f);
 }
 
 float UBossEncounterComponent::GetStateProgress() const
@@ -124,7 +122,7 @@ float UBossEncounterComponent::GetCurrentStateDuration() const
 	case EBossEncounterState::Attacking:
 		return GetCurrentAttackActiveDuration();
 	case EBossEncounterState::Recovery:
-		return bPhase2ComboActive && Phase2ComboStep == 1
+		return GetCombatPhase() == EBossCombatPhase::Phase2
 			? GetPhase2InterAttackDelay()
 			: RecoveryDuration;
 	case EBossEncounterState::WeakPointExposed:
@@ -293,10 +291,7 @@ void UBossEncounterComponent::TickComponent(
 	case EBossEncounterState::Attacking:
 		if (CurrentAttack == EBossAttackType::Shockwave)
 		{
-			UpdateShockwave(FMath::Clamp(
-				StateElapsed / GetShockwaveExpansionDuration(),
-				0.0f,
-				1.0f));
+			TickShockwaveAttack();
 		}
 		else if (CurrentAttack == EBossAttackType::AimedVolley
 			|| CurrentAttack == EBossAttackType::FanBarrage)
@@ -305,22 +300,18 @@ void UBossEncounterComponent::TickComponent(
 		}
 		if (StateElapsed >= GetCurrentAttackActiveDuration())
 		{
-			const bool bFinalComboAttack =
-				bPhase2ComboActive && Phase2ComboStep == 2;
-			const bool bFinalPhase1Attack =
-				!bDebugForceBarrage
-				&& !bPhase2ComboActive
-				&& CompletedAttacksSinceExposure + 1
-					>= FMath::Max(AttacksBeforeWeakPointExposure, 1);
-			if (bFinalComboAttack)
+			const bool bPhase2 =
+				GetCombatPhase() == EBossCombatPhase::Phase2;
+			const int32 AttacksBeforeStun = bPhase2
+				? FMath::Max(Phase2AttacksBeforeStun, 1)
+				: FMath::Max(AttacksBeforeWeakPointExposure, 1);
+			++CompletedAttacksSinceExposure;
+			const bool bStunImmediately = !bDebugForceBarrage
+				&& CompletedAttacksSinceExposure >= AttacksBeforeStun;
+			if (bStunImmediately)
 			{
-				bPhase2ComboActive = false;
-				Phase2ComboStep = 0;
-				SetEncounterState(EBossEncounterState::WeakPointExposed);
-			}
-			else if (bFinalPhase1Attack)
-			{
-				++CompletedAttacksSinceExposure;
+				// The final attack of a round goes straight into Stun. Never insert
+				// Recovery or the Phase 2 inter-attack delay at this boundary.
 				SetEncounterState(EBossEncounterState::WeakPointExposed);
 			}
 			else
@@ -334,33 +325,13 @@ void UBossEncounterComponent::TickComponent(
 		{
 			if (bDebugForceBarrage)
 			{
-				bPhase2ComboActive = false;
-				Phase2ComboStep = 0;
 				CompletedAttacksSinceExposure = 0;
+				ResetPhase2Round();
 				SetEncounterState(EBossEncounterState::SelectingAttack);
-			}
-			else if (bPhase2ComboActive && Phase2ComboStep == 1)
-			{
-				BeginPhase2SecondAttack();
-			}
-			else if (bPhase2ComboActive && Phase2ComboStep == 2)
-			{
-				bPhase2ComboActive = false;
-				Phase2ComboStep = 0;
-				SetEncounterState(EBossEncounterState::WeakPointExposed);
 			}
 			else
 			{
-				++CompletedAttacksSinceExposure;
-				if (CompletedAttacksSinceExposure
-				>= FMath::Max(AttacksBeforeWeakPointExposure, 1))
-				{
-					SetEncounterState(EBossEncounterState::WeakPointExposed);
-				}
-				else
-				{
-					SetEncounterState(EBossEncounterState::SelectingAttack);
-				}
+				SetEncounterState(EBossEncounterState::SelectingAttack);
 			}
 		}
 		break;
@@ -368,6 +339,7 @@ void UBossEncounterComponent::TickComponent(
 		if (StateElapsed >= GetCurrentStateDuration())
 		{
 			CompletedAttacksSinceExposure = 0;
+			ResetPhase2Round();
 			SetEncounterState(EBossEncounterState::SelectingAttack);
 		}
 		break;
@@ -504,6 +476,12 @@ void UBossEncounterComponent::SetEncounterState(
 			this,
 			ERDCAAudioCue::BossDeath,
 			GetOwner()->GetActorLocation(),
+			0.92f);
+		RDCAAudio::PlayAtLocation(
+			this,
+			ERDCAAudioCue::BossRoar,
+			GetOwner()->GetActorLocation(),
+			0.78f,
 			0.72f);
 		FinishCurrentAttack();
 	}
@@ -532,6 +510,7 @@ void UBossEncounterComponent::HandleWeakPointCrash(
 	// One exposure represents one Boss HP opportunity. Closing it immediately
 	// prevents multiple Anchors from removing several HP during the same stun.
 	CompletedAttacksSinceExposure = 0;
+	ResetPhase2Round();
 	if (WeakPoint.IsValid() && WeakPoint->IsBossDefeated())
 	{
 		SetEncounterState(EBossEncounterState::Dead);
@@ -589,7 +568,7 @@ void UBossEncounterComponent::SelectNextAttack()
 	}
 	if (GetCombatPhase() == EBossCombatPhase::Phase2)
 	{
-		SelectPhase2Combo();
+		SelectPhase2RoundAttack();
 		return;
 	}
 
@@ -747,9 +726,21 @@ float UBossEncounterComponent::GetCurrentAttackActiveDuration() const
 	case EBossAttackType::SweepLaser:
 		return LaserActiveSweepDuration;
 	case EBossAttackType::Shockwave:
+		if (IsEnhancedDoubleShockwaveAttack())
+		{
+			return GetShockwaveExpansionDuration()
+				+ FMath::Max(Phase2ShockwavePulseDelay, 0.0f);
+		}
+		return GetShockwaveExpansionDuration();
 	default:
 		return GetShockwaveExpansionDuration();
 	}
+}
+
+bool UBossEncounterComponent::IsEnhancedDoubleShockwaveAttack() const
+{
+	return bCurrentPhase2DoubleShockwave
+		&& CurrentAttack == EBossAttackType::Shockwave;
 }
 
 void UBossEncounterComponent::BeginCurrentAttackWarning()
@@ -817,6 +808,15 @@ void UBossEncounterComponent::BeginCurrentAttack()
 	switch (CurrentAttack)
 	{
 	case EBossAttackType::Shockwave:
+		ActiveShockwavePulse = 1;
+		bPlayerDamagedBySecondaryShockwave = false;
+		if (SecondaryShockwaveProceduralVisual)
+		{
+			SecondaryShockwaveProceduralVisual->SetVisibility(false);
+			SecondaryShockwaveProceduralVisual->SetHiddenInGame(true);
+		}
+		SetShockwaveCollisionEnabledFor(
+			SecondaryShockwaveCollisionSegments, false);
 		RDCAAudio::PlayAtLocation(
 			this,
 			ERDCAAudioCue::ShockwaveRelease,
@@ -876,8 +876,16 @@ void UBossEncounterComponent::BeginCurrentAttack()
 
 void UBossEncounterComponent::FinishCurrentAttack()
 {
+	ActiveShockwavePulse = 0;
 	SetShockwaveCollisionEnabled(false);
 	SetShockwaveProceduralVisualVisible(false);
+	SetShockwaveCollisionEnabledFor(
+		SecondaryShockwaveCollisionSegments, false);
+	if (SecondaryShockwaveProceduralVisual)
+	{
+		SecondaryShockwaveProceduralVisual->SetVisibility(false);
+		SecondaryShockwaveProceduralVisual->SetHiddenInGame(true);
+	}
 	if (ShockwaveVisual.IsValid())
 	{
 		ShockwaveVisual->SetVisibility(false);
@@ -1411,7 +1419,8 @@ void UBossEncounterComponent::SpawnSharedBarrageProjectile(
 	const EBossProjectileMotionMode MotionMode,
 	const float CurveRate,
 	const float MaxCurve,
-	AActor* HomingTarget)
+	AActor* HomingTarget,
+	const float SizeMultiplier)
 {
 	const TSubclassOf<ABossFanProjectile> ProjectileClass = FanProjectileClass;
 	if (!GetWorld() || !ProjectileClass || Direction.IsNearlyZero())
@@ -1435,9 +1444,12 @@ void UBossEncounterComponent::SpawnSharedBarrageProjectile(
 		SpawnParameters);
 	if (Projectile)
 	{
+		Projectile->SetActorScale3D(
+			Projectile->GetActorScale3D()
+				* FMath::Max(SizeMultiplier, 0.1f));
 		Projectile->InitializePatternProjectile(
 			Direction,
-			Speed,
+			Speed * FMath::Max(BarrageSpeedMultiplier, 0.1f),
 			BarrageProjectileDamage,
 			CruiseHeight,
 			MotionMode,
@@ -1588,7 +1600,8 @@ void UBossEncounterComponent::SpawnHomingWave()
 	const FVector SpawnLocation = GetProjectileOriginLocation();
 	const FVector CenterDirection =
 		(PlayerPawn->GetActorLocation() - SpawnLocation).GetSafeNormal();
-	const int32 Count = FMath::Max(HomingProjectileCount, 1);
+	const int32 Count = FMath::Max(HomingProjectileCount, 1)
+		* FMath::Max(HomingCountMultiplier, 1);
 	for (int32 Index = 0; Index < Count; ++Index)
 	{
 		const float Alpha = Count > 1
@@ -1606,7 +1619,8 @@ void UBossEncounterComponent::SpawnHomingWave()
 			EBossProjectileMotionMode::Homing,
 			0.0f,
 			0.0f,
-			PlayerPawn);
+			PlayerPawn,
+			HomingSizeMultiplier);
 	}
 }
 
@@ -1711,151 +1725,230 @@ void UBossEncounterComponent::SpawnLegacyDenseFanProjectile(
 		EBossProjectileMotionMode::Straight);
 }
 
-void UBossEncounterComponent::SelectPhase2Combo()
+void UBossEncounterComponent::SelectPhase2RoundAttack()
 {
-	bPhase2ComboActive = true;
-	Phase2ComboStep = 1;
-	CompletedAttacksSinceExposure = 0;
-
-	const int32 Phase2Round = WeakPoint.IsValid()
-		? FMath::Max(
-			GetEffectivePhase2StartHitPoints()
-				- WeakPoint->GetCurrentHitPoints(),
-			0)
-		: 0;
-	switch (FMath::Clamp(Phase2Round, 0, 2))
+	if (CompletedAttacksSinceExposure == 0)
 	{
-	case 0:
-		ActivePhase2Sequence = EBossPhase2Sequence::DoubleShockwave;
-		CurrentAttack = EBossAttackType::Shockwave;
-		break;
-	case 1:
-		ActivePhase2Sequence = EBossPhase2Sequence::BarrageLaser;
-		if (FanProjectileClass)
+		ResetPhase2Round();
+	}
+
+	// Selection is deliberately hierarchical. The whole barrage family owns one
+	// category weight; its five patterns do not each compete with Shockwave and
+	// Laser. Exact attacks are then removed until the current three-attack round
+	// ends, so Shockwave/Laser cannot repeat and barrage patterns cannot repeat.
+	const EBossBarragePattern Phase2Patterns[] = {
+		EBossBarragePattern::CurvedVolley,
+		EBossBarragePattern::HomingVolley,
+		EBossBarragePattern::RotatingGapWall,
+		EBossBarragePattern::DoubleSpiral,
+		EBossBarragePattern::LegacyDenseFan};
+	TArray<EBossBarragePattern> AvailableBarragePatterns;
+	if (FanProjectileClass)
+	{
+		for (const EBossBarragePattern Pattern : Phase2Patterns)
 		{
-			EBossBarragePattern Pattern;
-			if (bHasPreviousBarragePattern
-				&& PreviousBarragePattern == EBossBarragePattern::RotatingGapWall)
+			const int32 PatternKey = 100 + static_cast<int32>(Pattern);
+			if (!Phase2UsedAttackKeys.Contains(PatternKey))
 			{
-				Pattern = EBossBarragePattern::LegacyDenseFan;
+				AvailableBarragePatterns.Add(Pattern);
 			}
-			else if (bHasPreviousBarragePattern
-				&& PreviousBarragePattern == EBossBarragePattern::LegacyDenseFan)
-			{
-				Pattern = EBossBarragePattern::RotatingGapWall;
-			}
-			else
-			{
-				Pattern = AttackRandomStream.FRand() < 0.5f
-					? EBossBarragePattern::RotatingGapWall
-					: EBossBarragePattern::LegacyDenseFan;
-			}
-			SetBarragePattern(Pattern);
 		}
-		else
+	}
+
+	const bool bBarrageAvailable = !AvailableBarragePatterns.IsEmpty();
+	const bool bShockwaveAvailable = !Phase2UsedAttackKeys.Contains(0);
+	const bool bLaserAvailable = SweepLaserClass
+		&& !Phase2UsedAttackKeys.Contains(1);
+	if (!bBarrageAvailable && !bShockwaveAvailable && !bLaserAvailable)
+	{
+		// A designer may request a round longer than the currently configured
+		// pool. Start a fresh pool instead of producing an invalid selection.
+		ResetPhase2Round();
+		SelectPhase2RoundAttack();
+		return;
+	}
+	float BarrageWeight = bBarrageAvailable
+		? FMath::Max(Phase2BarrageWeight, 0.0f)
+		: 0.0f;
+	float ShockwaveWeight = bShockwaveAvailable
+		? FMath::Max(Phase2ShockwaveWeight, 0.0f)
+		: 0.0f;
+	float LaserWeight = bLaserAvailable
+		? FMath::Max(Phase2LaserWeight, 0.0f)
+		: 0.0f;
+	float TotalWeight = BarrageWeight + ShockwaveWeight + LaserWeight;
+	if (TotalWeight <= UE_KINDA_SMALL_NUMBER)
+	{
+		// All-zero editor settings remain playable: choose uniformly between the
+		// categories that still contain an unused attack.
+		BarrageWeight = bBarrageAvailable ? 1.0f : 0.0f;
+		ShockwaveWeight = bShockwaveAvailable ? 1.0f : 0.0f;
+		LaserWeight = bLaserAvailable ? 1.0f : 0.0f;
+		TotalWeight = BarrageWeight + ShockwaveWeight + LaserWeight;
+	}
+
+	int32 SelectedKey = 0;
+	FString SelectedCategory = TEXT("Shockwave");
+	float Roll = AttackRandomStream.FRandRange(0.0f, TotalWeight);
+	if (bBarrageAvailable
+		&& (Roll < BarrageWeight
+			|| (!bShockwaveAvailable && !bLaserAvailable)))
+	{
+		const EBossBarragePattern SelectedPattern = AvailableBarragePatterns[
+			AttackRandomStream.RandRange(0, AvailableBarragePatterns.Num() - 1)];
+		SelectedKey = 100 + static_cast<int32>(SelectedPattern);
+		SelectedCategory = TEXT("Barrage");
+		SetBarragePattern(SelectedPattern);
+	}
+	else
+	{
+		Roll -= BarrageWeight;
+		if (bShockwaveAvailable
+			&& (Roll < ShockwaveWeight || !bLaserAvailable))
 		{
+			SelectedKey = 0;
+			SelectedCategory = TEXT("Shockwave");
 			CurrentAttack = EBossAttackType::Shockwave;
 		}
-		break;
-	case 2:
-	default:
-		ActivePhase2Sequence = EBossPhase2Sequence::SpecialBarrage;
-		if (FanProjectileClass)
+		else if (bLaserAvailable)
 		{
-			EBossBarragePattern Pattern;
-			if (bHasPreviousSpecialOpeningPattern
-				&& PreviousSpecialOpeningPattern == EBossBarragePattern::CurvedVolley)
-			{
-				Pattern = EBossBarragePattern::HomingVolley;
-			}
-			else if (bHasPreviousSpecialOpeningPattern
-				&& PreviousSpecialOpeningPattern == EBossBarragePattern::HomingVolley)
-			{
-				Pattern = EBossBarragePattern::CurvedVolley;
-			}
-			else
-			{
-				Pattern = AttackRandomStream.FRand() < 0.5f
-					? EBossBarragePattern::CurvedVolley
-					: EBossBarragePattern::HomingVolley;
-			}
-			PreviousSpecialOpeningPattern = Pattern;
-			bHasPreviousSpecialOpeningPattern = true;
-			SetBarragePattern(Pattern);
+			SelectedKey = 1;
+			SelectedCategory = TEXT("Laser");
+			CurrentAttack = EBossAttackType::SweepLaser;
 		}
 		else
 		{
-			CurrentAttack = SweepLaserClass
-				? EBossAttackType::SweepLaser
-				: EBossAttackType::Shockwave;
+			// Numerical endpoint fallback; the barrage category is the only one
+			// that can reach this branch.
+			const EBossBarragePattern SelectedPattern =
+				AvailableBarragePatterns.Last();
+			SelectedKey = 100 + static_cast<int32>(SelectedPattern);
+			SelectedCategory = TEXT("Barrage");
+			SetBarragePattern(SelectedPattern);
 		}
-		break;
 	}
+	Phase2UsedAttackKeys.Add(SelectedKey);
+	bCurrentPhase2DoubleShockwave = SelectedKey == 0;
 
 	UE_LOG(
 		LogRDCAPlayer,
 		Log,
-		TEXT("Boss Phase 2 sequence selected. Boss=%s Round=%d Sequence=%d PlayerState=%d First=%d Pattern=%d Target=%s Seed=%d"),
+		TEXT("Boss Phase 2 round attack selected. Boss=%s Step=%d/%d Category=%s Key=%d Attack=%d Pattern=%d AvailableWeights=(Barrage=%.2f Shockwave=%.2f Laser=%.2f) Used=%d Target=%s Seed=%d"),
 		*GetNameSafe(GetOwner()),
-		Phase2Round,
-		static_cast<int32>(ActivePhase2Sequence),
-		static_cast<int32>(LastObservedPlayerState),
+		CompletedAttacksSinceExposure + 1,
+		FMath::Max(Phase2AttacksBeforeStun, 1),
+		*SelectedCategory,
+		SelectedKey,
 		static_cast<int32>(CurrentAttack),
 		static_cast<int32>(ActiveBarragePattern),
+		BarrageWeight,
+		ShockwaveWeight,
+		LaserWeight,
+		Phase2UsedAttackKeys.Num(),
 		*LockedTargetLocation.ToCompactString(),
 		ActiveAttackRandomSeed);
 	SetEncounterState(EBossEncounterState::Preparing);
 }
 
-void UBossEncounterComponent::BeginPhase2SecondAttack()
+void UBossEncounterComponent::ResetPhase2Round()
 {
-	Phase2ComboStep = 2;
-	switch (ActivePhase2Sequence)
+	Phase2UsedAttackKeys.Reset();
+	bCurrentPhase2DoubleShockwave = false;
+}
+
+void UBossEncounterComponent::TickShockwaveAttack()
+{
+	const float PulseDuration = GetShockwaveExpansionDuration();
+	if (!IsEnhancedDoubleShockwaveAttack())
 	{
-	case EBossPhase2Sequence::DoubleShockwave:
-		CurrentAttack = EBossAttackType::Shockwave;
-		break;
-	case EBossPhase2Sequence::BarrageLaser:
-		if (SweepLaserClass)
-		{
-			CurrentAttack = EBossAttackType::SweepLaser;
-		}
-		else if (FanProjectileClass)
-		{
-			SetBarragePattern(EBossBarragePattern::DoubleSpiral);
-		}
-		else
-		{
-			CurrentAttack = EBossAttackType::Shockwave;
-		}
-		break;
-	case EBossPhase2Sequence::SpecialBarrage:
-	default:
-		if (FanProjectileClass)
-		{
-			SetBarragePattern(EBossBarragePattern::DoubleSpiral);
-		}
-		else if (SweepLaserClass)
-		{
-			CurrentAttack = EBossAttackType::SweepLaser;
-		}
-		else
-		{
-			CurrentAttack = EBossAttackType::Shockwave;
-		}
-		break;
+		UpdateShockwave(FMath::Clamp(StateElapsed / PulseDuration, 0.0f, 1.0f));
+		return;
 	}
+
+	const float PulseDelay = FMath::Max(Phase2ShockwavePulseDelay, 0.0f);
+	if (StateElapsed <= PulseDuration)
+	{
+		UpdateShockwave(FMath::Clamp(StateElapsed / PulseDuration, 0.0f, 1.0f));
+	}
+	else
+	{
+		SetShockwaveCollisionEnabled(false);
+		SetShockwaveProceduralVisualVisible(false);
+		if (ShockwaveVisual.IsValid())
+		{
+			ShockwaveVisual->SetVisibility(false);
+		}
+	}
+
+	if (StateElapsed >= PulseDelay)
+	{
+		if (ActiveShockwavePulse < 2)
+		{
+			BeginSecondShockwavePulse();
+		}
+		const float SecondPulseElapsed = StateElapsed - PulseDelay;
+		UpdateSecondaryShockwave(FMath::Clamp(
+			SecondPulseElapsed / PulseDuration, 0.0f, 1.0f));
+	}
+}
+
+void UBossEncounterComponent::BeginSecondShockwavePulse()
+{
+	ActiveShockwavePulse = 2;
+	bPlayerDamagedBySecondaryShockwave = false;
+	const float InitialRadius = FMath::Min(
+		ShockwaveInitialRadius,
+		ShockwaveExpandedMaximumRadius);
+
+	if (SecondaryShockwaveProceduralVisual)
+	{
+		SecondaryShockwaveProceduralVisual->SetWorldLocation(
+			GetShockwaveOriginLocation());
+		SecondaryShockwaveProceduralVisual->SetVisibility(true);
+		SecondaryShockwaveProceduralVisual->SetHiddenInGame(false);
+		if (ShockwaveFireActiveMaterial)
+		{
+			SecondaryShockwaveProceduralVisual->SetMaterial(
+				0, ShockwaveFireActiveMaterial);
+		}
+	}
+	UpdateSecondaryShockwave(0.0f);
+	SetShockwaveCollisionEnabledFor(
+		SecondaryShockwaveCollisionSegments, true);
+	RDCAAudio::PlayAtLocation(
+		this,
+		ERDCAAudioCue::ShockwaveRelease,
+		GetShockwaveOriginLocation(),
+		0.72f,
+		1.06f);
 
 	UE_LOG(
 		LogRDCAPlayer,
 		Log,
-		TEXT("Boss Phase 2 sequence advancing. Boss=%s Sequence=%d Attack=%d Pattern=%d LockedTarget=%s"),
+		TEXT("Boss enhanced shockwave second pulse started. Boss=%s Delay=%.2f"),
 		*GetNameSafe(GetOwner()),
-		static_cast<int32>(ActivePhase2Sequence),
-		static_cast<int32>(CurrentAttack),
-		static_cast<int32>(ActiveBarragePattern),
-		*LockedTargetLocation.ToCompactString());
-	SetEncounterState(EBossEncounterState::Preparing);
+		FMath::Max(Phase2ShockwavePulseDelay, 0.0f));
+}
+
+void UBossEncounterComponent::UpdateSecondaryShockwave(
+	const float NormalizedTime)
+{
+	const float InitialRadius = FMath::Min(
+		ShockwaveInitialRadius,
+		ShockwaveExpandedMaximumRadius);
+	const float CurrentRadius = FMath::Lerp(
+		InitialRadius,
+		ShockwaveExpandedMaximumRadius,
+		FMath::Clamp(NormalizedTime, 0.0f, 1.0f));
+	UpdateShockwaveProceduralVisualComponent(
+		SecondaryShockwaveProceduralVisual,
+		CurrentRadius,
+		bSecondaryShockwaveProceduralMeshBuilt,
+		BuiltSecondaryShockwaveVisualRadialSegments,
+		BuiltSecondaryShockwaveVisualTubeSegments);
+	UpdateShockwaveCollisionSegmentsFor(
+		SecondaryShockwaveCollisionSegments,
+		CurrentRadius * ShockwaveWorldUnitsPerConfiguredUnit);
 }
 
 void UBossEncounterComponent::UpdateShockwave(const float NormalizedTime)
@@ -2061,12 +2154,45 @@ void UBossEncounterComponent::CreateShockwaveProceduralVisual()
 	// The Boss actor is deliberately scaled. Keep this generated world-space
 	// ring at scale 1 so its radius/width/height match the collision values.
 	ShockwaveProceduralVisual->SetWorldScale3D(FVector::OneVector);
+
+	SecondaryShockwaveProceduralVisual = NewObject<UProceduralMeshComponent>(
+		GetOwner(), TEXT("SecondaryShockwaveProceduralVisual"));
+	if (SecondaryShockwaveProceduralVisual)
+	{
+		SecondaryShockwaveProceduralVisual->SetupAttachment(
+			GetOwner()->GetRootComponent());
+		SecondaryShockwaveProceduralVisual->SetMobility(
+			EComponentMobility::Movable);
+		SecondaryShockwaveProceduralVisual->SetCollisionEnabled(
+			ECollisionEnabled::NoCollision);
+		SecondaryShockwaveProceduralVisual->SetGenerateOverlapEvents(false);
+		SecondaryShockwaveProceduralVisual->SetCastShadow(false);
+		SecondaryShockwaveProceduralVisual->SetVisibility(false);
+		SecondaryShockwaveProceduralVisual->SetHiddenInGame(true);
+		SecondaryShockwaveProceduralVisual->RegisterComponent();
+		SecondaryShockwaveProceduralVisual->SetWorldScale3D(FVector::OneVector);
+	}
 }
 
 void UBossEncounterComponent::UpdateShockwaveProceduralVisual(
 	const float ConfiguredRadius)
 {
-	if (!ShockwaveProceduralVisual)
+	UpdateShockwaveProceduralVisualComponent(
+		ShockwaveProceduralVisual,
+		ConfiguredRadius,
+		bShockwaveProceduralMeshBuilt,
+		BuiltShockwaveVisualRadialSegments,
+		BuiltShockwaveVisualTubeSegments);
+}
+
+void UBossEncounterComponent::UpdateShockwaveProceduralVisualComponent(
+	UProceduralMeshComponent* Visual,
+	const float ConfiguredRadius,
+	bool& bMeshBuilt,
+	int32& BuiltRadialSegments,
+	int32& BuiltTubeSegments)
+{
+	if (!Visual)
 	{
 		return;
 	}
@@ -2075,12 +2201,12 @@ void UBossEncounterComponent::UpdateShockwaveProceduralVisual(
 		ShockwaveVisualRadialSegments, 12, 64);
 	const int32 TubeSegments = FMath::Clamp(
 		ShockwaveVisualTubeSegments, 4, 16);
-	if (bShockwaveProceduralMeshBuilt
-		&& (BuiltShockwaveVisualRadialSegments != RadialSegments
-			|| BuiltShockwaveVisualTubeSegments != TubeSegments))
+	if (bMeshBuilt
+		&& (BuiltRadialSegments != RadialSegments
+			|| BuiltTubeSegments != TubeSegments))
 	{
-		ShockwaveProceduralVisual->ClearAllMeshSections();
-		bShockwaveProceduralMeshBuilt = false;
+		Visual->ClearAllMeshSections();
+		bMeshBuilt = false;
 	}
 
 	const float WorldUnitScale = FMath::Max(
@@ -2098,7 +2224,7 @@ void UBossEncounterComponent::UpdateShockwaveProceduralVisual(
 	const FVector RingCenter = ShockwaveVisual.IsValid()
 		? ShockwaveVisual->GetComponentLocation()
 		: GetShockwaveOriginLocation();
-	ShockwaveProceduralVisual->SetWorldLocation(RingCenter);
+	Visual->SetWorldLocation(RingCenter);
 
 	const int32 VertexCount = RadialSegments * TubeSegments;
 	TArray<FVector> Vertices;
@@ -2139,7 +2265,7 @@ void UBossEncounterComponent::UpdateShockwaveProceduralVisual(
 		}
 	}
 
-	if (!bShockwaveProceduralMeshBuilt)
+	if (!bMeshBuilt)
 	{
 		TArray<int32> Triangles;
 		Triangles.Reserve(RadialSegments * TubeSegments * 6);
@@ -2164,15 +2290,15 @@ void UBossEncounterComponent::UpdateShockwaveProceduralVisual(
 				Triangles.Add(C);
 			}
 		}
-		ShockwaveProceduralVisual->CreateMeshSection(
+		Visual->CreateMeshSection(
 			0, Vertices, Triangles, Normals, UVs, VertexColors, Tangents, false);
-		bShockwaveProceduralMeshBuilt = true;
-		BuiltShockwaveVisualRadialSegments = RadialSegments;
-		BuiltShockwaveVisualTubeSegments = TubeSegments;
+		bMeshBuilt = true;
+		BuiltRadialSegments = RadialSegments;
+		BuiltTubeSegments = TubeSegments;
 	}
 	else
 	{
-		ShockwaveProceduralVisual->UpdateMeshSection(
+		Visual->UpdateMeshSection(
 			0, Vertices, Normals, UVs, VertexColors, Tangents);
 	}
 }
@@ -2198,18 +2324,29 @@ void UBossEncounterComponent::SetShockwaveProceduralVisualMaterial(
 
 void UBossEncounterComponent::CreateShockwaveCollisionSegments()
 {
+	CreateShockwaveCollisionSegmentsFor(
+		ShockwaveCollisionSegments, TEXT("ShockwaveCollisionSegment"));
+	CreateShockwaveCollisionSegmentsFor(
+		SecondaryShockwaveCollisionSegments,
+		TEXT("SecondaryShockwaveCollisionSegment"));
+}
+
+void UBossEncounterComponent::CreateShockwaveCollisionSegmentsFor(
+	TArray<TObjectPtr<UBoxComponent>>& Segments,
+	const TCHAR* NamePrefix)
+{
 	if (!GetOwner() || !GetOwner()->GetRootComponent()
-		|| !ShockwaveCollisionSegments.IsEmpty())
+		|| !Segments.IsEmpty())
 	{
 		return;
 	}
 
 	const int32 SegmentCount = FMath::Clamp(ShockwaveCollisionSegmentCount, 8, 48);
-	ShockwaveCollisionSegments.Reserve(SegmentCount);
+	Segments.Reserve(SegmentCount);
 	for (int32 Index = 0; Index < SegmentCount; ++Index)
 	{
 		const FName SegmentName(*FString::Printf(
-			TEXT("ShockwaveCollisionSegment_%02d"), Index));
+			TEXT("%s_%02d"), NamePrefix, Index));
 		UBoxComponent* Segment = NewObject<UBoxComponent>(GetOwner(), SegmentName);
 		if (!Segment)
 		{
@@ -2228,22 +2365,26 @@ void UBossEncounterComponent::CreateShockwaveCollisionSegments()
 			this, &UBossEncounterComponent::HandleShockwaveSegmentOverlap);
 		Segment->RegisterComponent();
 		Segment->SetWorldScale3D(FVector::OneVector);
-		ShockwaveCollisionSegments.Add(Segment);
+		Segments.Add(Segment);
 	}
 }
 
 void UBossEncounterComponent::UpdateShockwaveCollisionSegments(
 	const float RingCenterRadius)
 {
+	UpdateShockwaveCollisionSegmentsFor(
+		ShockwaveCollisionSegments, RingCenterRadius);
+}
+
+void UBossEncounterComponent::UpdateShockwaveCollisionSegmentsFor(
+	TArray<TObjectPtr<UBoxComponent>>& Segments,
+	const float RingCenterRadius)
+{
 	if (!ShockwaveVisual.IsValid())
 	{
 		return;
 	}
-	if (ShockwaveCollisionSegments.IsEmpty())
-	{
-		CreateShockwaveCollisionSegments();
-	}
-	if (ShockwaveCollisionSegments.IsEmpty())
+	if (Segments.IsEmpty())
 	{
 		return;
 	}
@@ -2262,7 +2403,7 @@ void UBossEncounterComponent::UpdateShockwaveCollisionSegments(
 	const float RingRadius = FMath::Max(
 		RingCenterRadius,
 		GameplayWidth * 0.5f);
-	const int32 SegmentCount = ShockwaveCollisionSegments.Num();
+	const int32 SegmentCount = Segments.Num();
 	const float ArcLength = (2.0f * PI * RingRadius) / SegmentCount;
 	const FVector BoxExtent(
 		GameplayWidth * 0.5f + ShockwaveCollisionSegmentOverlap,
@@ -2272,7 +2413,7 @@ void UBossEncounterComponent::UpdateShockwaveCollisionSegments(
 
 	for (int32 Index = 0; Index < SegmentCount; ++Index)
 	{
-		UBoxComponent* Segment = ShockwaveCollisionSegments[Index];
+		UBoxComponent* Segment = Segments[Index];
 		if (!Segment)
 		{
 			continue;
@@ -2296,7 +2437,14 @@ void UBossEncounterComponent::UpdateShockwaveCollisionSegments(
 
 void UBossEncounterComponent::SetShockwaveCollisionEnabled(const bool bEnabled)
 {
-	for (UBoxComponent* Segment : ShockwaveCollisionSegments)
+	SetShockwaveCollisionEnabledFor(ShockwaveCollisionSegments, bEnabled);
+}
+
+void UBossEncounterComponent::SetShockwaveCollisionEnabledFor(
+	TArray<TObjectPtr<UBoxComponent>>& Segments,
+	const bool bEnabled)
+{
+	for (UBoxComponent* Segment : Segments)
 	{
 		if (Segment)
 		{
@@ -2322,12 +2470,19 @@ void UBossEncounterComponent::HandleShockwaveSegmentOverlap(
 	const bool bFromSweep,
 	const FHitResult& SweepResult)
 {
-	ApplyShockwaveOverlapDamage(OtherActor);
+	const bool bSecondaryPulse = SecondaryShockwaveCollisionSegments.Contains(
+		Cast<UBoxComponent>(OverlappedComponent));
+	ApplyShockwaveOverlapDamage(OtherActor, bSecondaryPulse);
 }
 
-void UBossEncounterComponent::ApplyShockwaveOverlapDamage(AActor* OtherActor)
+void UBossEncounterComponent::ApplyShockwaveOverlapDamage(
+	AActor* OtherActor,
+	const bool bSecondaryPulse)
 {
-	if (bPlayerDamagedThisAttack || CurrentAttack != EBossAttackType::Shockwave
+	bool& bPulseDamagedPlayer = bSecondaryPulse
+		? bPlayerDamagedBySecondaryShockwave
+		: bPlayerDamagedThisAttack;
+	if (bPulseDamagedPlayer || CurrentAttack != EBossAttackType::Shockwave
 		|| EncounterState != EBossEncounterState::Attacking || !GetWorld())
 	{
 		return;
@@ -2351,15 +2506,24 @@ void UBossEncounterComponent::ApplyShockwaveOverlapDamage(AActor* OtherActor)
 	if (UPlayerHealthComponent* Health =
 		PlayerPawn->FindComponentByClass<UPlayerHealthComponent>())
 	{
-		bPlayerDamagedThisAttack = Health->ReceiveDamage(ShockwaveDamage);
-		if (bPlayerDamagedThisAttack)
+		bPulseDamagedPlayer = Health->ReceiveDamage(ShockwaveDamage);
+		if (bPulseDamagedPlayer)
 		{
-			SetShockwaveCollisionEnabled(false);
+			if (bSecondaryPulse)
+			{
+				SetShockwaveCollisionEnabledFor(
+					SecondaryShockwaveCollisionSegments, false);
+			}
+			else
+			{
+				SetShockwaveCollisionEnabled(false);
+			}
 			UE_LOG(
 				LogRDCAPlayer,
 				Log,
-				TEXT("Boss shockwave overlap hit. Player=%s"),
-				*GetNameSafe(PlayerPawn));
+				TEXT("Boss shockwave overlap hit. Player=%s Pulse=%d"),
+				*GetNameSafe(PlayerPawn),
+				bSecondaryPulse ? 2 : 1);
 		}
 	}
 }

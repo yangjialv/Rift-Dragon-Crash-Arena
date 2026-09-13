@@ -9,7 +9,6 @@
 #include "Boss/BossWeakPointComponent.h"
 #include "Combat/CrashResponseComponent.h"
 #include "Components/PrimitiveComponent.h"
-#include "DrawDebugHelpers.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PawnMovementComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -58,14 +57,10 @@ bool IsBossCrashAimTarget(const FHitResult& Hit)
 
 void SetBossAimCursor(APlayerController& PlayerController, const bool bBossAim)
 {
-	if (bBossAim)
-	{
-		PlayerController.CurrentMouseCursor = EMouseCursor::Crosshairs;
-	}
-	else
-	{
-		PlayerController.CurrentMouseCursor = PlayerController.DefaultMouseCursor;
-	}
+	(void)bBossAim;
+	// The combat HUD owns the software reticle and reads IsBossAimActive() to
+	// change its colour. Never reveal a platform cursor on top of it.
+	PlayerController.CurrentMouseCursor = EMouseCursor::None;
 }
 
 float GetArenaAimPlaneZ(const UWorld& World, const APawn& OwnerPawn)
@@ -136,10 +131,6 @@ void UPhaseCrashComponent::TickComponent(
 			MoveAttached(FVector2D::ZeroVector);
 		}
 		UpdateAimTarget();
-		if (bDrawDebugAim && GetWorld())
-		{
-			DrawTrajectoryPreview();
-		}
 		break;
 
 	case EPhaseCrashState::Crashing:
@@ -557,8 +548,17 @@ float UPhaseCrashComponent::GetChargeAlpha() const
 {
 	FVector DragOffset = AimTarget - DragStartAimTarget;
 	DragOffset.Z = 0.0f;
-	return MaxDragDistance > 0.0f
-		? FMath::Clamp(DragOffset.Size() / MaxDragDistance, 0.0f, 1.0f)
+	const float EffectiveDragDistance = FMath::Max(
+		DragOffset.Size() - FMath::Max(MinimumDragDistance, 0.0f),
+		0.0f);
+	const float EffectiveMaximumDistance = FMath::Max(
+		MaxDragDistance - FMath::Max(MinimumDragDistance, 0.0f),
+		0.0f);
+	return EffectiveMaximumDistance > 0.0f
+		? FMath::Clamp(
+			EffectiveDragDistance / EffectiveMaximumDistance,
+			0.0f,
+			1.0f)
 		: 1.0f;
 }
 
@@ -736,13 +736,6 @@ bool UPhaseCrashComponent::CalculateTrajectory(
 	FVector HorizontalOffset = AimTarget - OutStart;
 	HorizontalOffset.Z = 0.0f;
 
-	FVector DragOffset = AimTarget - DragStartAimTarget;
-	DragOffset.Z = 0.0f;
-	if (DragOffset.Size() < MinimumDragDistance)
-	{
-		return false;
-	}
-
 	const float TargetHorizontalDistance = HorizontalOffset.Size();
 	if (TargetHorizontalDistance <= UE_KINDA_SMALL_NUMBER)
 	{
@@ -774,11 +767,16 @@ FVector UPhaseCrashComponent::EvaluateTrajectory(const float NormalizedTime) con
 	return FMath::Lerp(CrashStart, CrashEnd, Alpha) + FVector::UpVector * ParabolaOffset;
 }
 
-void UPhaseCrashComponent::DrawTrajectoryPreview() const
+bool UPhaseCrashComponent::GetAimPreview(
+	TArray<FVector>& OutWorldPoints,
+	FVector& OutLandingPoint,
+	bool& bOutHasLaunchTrajectory) const
 {
-	if (!GetWorld())
+	OutWorldPoints.Reset();
+	bOutHasLaunchTrajectory = false;
+	if (!bDrawDebugAim || CrashState != EPhaseCrashState::Charging || !OwnerPawn)
 	{
-		return;
+		return false;
 	}
 
 	FVector PreviewStart;
@@ -791,57 +789,25 @@ void UPhaseCrashComponent::DrawTrajectoryPreview() const
 		PreviewArcHeight,
 		PreviewDuration))
 	{
-		// A press has already produced a valid cursor projection, even before
-		// enough drag distance exists to authorise a launch. Show that point
-		// immediately; only the trajectory remains absent until the player drags.
-		DrawDebugSphere(
-			GetWorld(),
-			AimTarget,
-			24.0f,
-			12,
-			FColor::Cyan,
-			false,
-			0.0f,
-			0,
-			2.0f);
-		return;
+		// Preserve immediate feedback on mouse press. The marker is valid even
+		// though the drag is not yet long enough to authorise a launch.
+		OutLandingPoint = AimTarget;
+		return true;
 	}
 
-	const FColor PreviewColor =
-		IsBossAimActive()
-			? FColor::Red
-			: GetPredictedArcType() == ECrashArcType::HighArc
-			? FColor::Yellow
-			: FColor::Green;
+	bOutHasLaunchTrajectory = true;
+	OutLandingPoint = PreviewEnd;
 	constexpr int32 SegmentCount = 20;
-	FVector PreviousPoint = PreviewStart;
-
-	for (int32 SegmentIndex = 1; SegmentIndex <= SegmentCount; ++SegmentIndex)
+	OutWorldPoints.Reserve(SegmentCount + 1);
+	for (int32 SegmentIndex = 0; SegmentIndex <= SegmentCount; ++SegmentIndex)
 	{
 		const float Alpha = static_cast<float>(SegmentIndex) / SegmentCount;
-		const FVector Point =
+		OutWorldPoints.Add(
 			FMath::Lerp(PreviewStart, PreviewEnd, Alpha)
-			+ FVector::UpVector * (4.0f * PreviewArcHeight * Alpha * (1.0f - Alpha));
-		DrawDebugLine(
-			GetWorld(),
-			PreviousPoint,
-			Point,
-			PreviewColor,
-			false,
-			0.0f,
-			0,
-			3.0f);
-		PreviousPoint = Point;
+			+ FVector::UpVector
+				* (4.0f * PreviewArcHeight * Alpha * (1.0f - Alpha)));
 	}
-
-	DrawDebugSphere(
-		GetWorld(),
-		PreviewEnd,
-		30.0f,
-		12,
-		PreviewColor,
-		false,
-		0.0f);
+	return true;
 }
 
 void UPhaseCrashComponent::TickCrash(const float DeltaTime)

@@ -32,6 +32,7 @@ rdca/Content/__ExternalActors__/ThirdPerson/Maps/ThirdPersonMap/D/SY/Z4CTQ4LG3YV
 # Local audio credentials, tooling and generated audition candidates
 .local/
 /audio/generated/
+/audio/BGM/*.mp3
 **/__pycache__/
 
 # Build and crash artifacts outside standard generated directories

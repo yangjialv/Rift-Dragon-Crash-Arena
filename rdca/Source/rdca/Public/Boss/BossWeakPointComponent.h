@@ -94,6 +94,11 @@ protected:
 		meta = (ClampMin = "1"))
 	int32 DamagePerQualifiedCrash = 1;
 
+	/** Multiplies the three layered weak-point impact effects, but not the Boss pain roar. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Weak Point|Audio",
+		meta = (ClampMin = "0.0", DisplayName = "Weak Point Impact Volume Multiplier"))
+	float WeakPointImpactVolumeMultiplier = 4.0f;
+
 private:
 	int32 CurrentHitPoints = 5;
 };

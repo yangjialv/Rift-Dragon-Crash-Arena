@@ -37,6 +37,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Arena Phase")
 	float GetExpansionRadius() const { return CurrentRadius; }
 
+	float GetBGMIntroVolume() const { return BGMIntroVolume; }
+	float GetBGMPhase1Volume() const { return BGMPhase1Volume; }
+	float GetBGMPhase1PressureVolume() const { return BGMPhase1PressureVolume; }
+	float GetBGMTransitionVolume() const { return BGMTransitionVolume; }
+	float GetBGMPhase2Volume() const { return BGMPhase2Volume; }
+	float GetBGMCriticalVolume() const { return BGMCriticalVolume; }
+	float GetBGMVolumeInterpSpeed() const { return BGMVolumeInterpSpeed; }
+	float GetBGMResultFadeOutDuration() const { return BGMResultFadeOutDuration; }
+
 	/** True when the expanding Source Code sphere has reached this world position. */
 	UFUNCTION(BlueprintPure, Category = "Arena Phase")
 	bool IsSourceCodePhaseAtLocation(FVector WorldLocation) const;
@@ -140,6 +149,39 @@ protected:
 	/** Lets the energy shell sit just outside the exact material-switch boundary. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Phase|Expansion Wave")
 	float ExpansionWaveRadiusOffset = 0.0f;
+
+	/** Volumes for the single continuously playing Boss BGM. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Phase|Music",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float BGMIntroVolume = 0.45f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Phase|Music",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float BGMPhase1Volume = 0.72f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Phase|Music",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float BGMPhase1PressureVolume = 0.78f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Phase|Music",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float BGMTransitionVolume = 0.62f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Phase|Music",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float BGMPhase2Volume = 0.82f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Phase|Music",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float BGMCriticalVolume = 0.9f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Phase|Music",
+		meta = (ClampMin = "0.1"))
+	float BGMVolumeInterpSpeed = 2.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Arena Phase|Music",
+		meta = (ClampMin = "0.0"))
+	float BGMResultFadeOutDuration = 2.5f;
 
 private:
 	struct FPhaseActorPair

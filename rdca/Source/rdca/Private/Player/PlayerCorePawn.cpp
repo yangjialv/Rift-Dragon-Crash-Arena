@@ -61,7 +61,7 @@ APlayerCorePawn::APlayerCorePawn()
 
 	MovementComponent = CreateDefaultSubobject<UFloatingPawnMovement>(TEXT("Movement"));
 	MovementComponent->UpdatedComponent = CollisionComponent;
-	MovementComponent->MaxSpeed = MoveSpeed;
+	MovementComponent->MaxSpeed = MoveSpeed * MovementSpeedMultiplier;
 	MovementComponent->Acceleration = 4000.0f;
 	MovementComponent->Deceleration = 5000.0f;
 
@@ -76,7 +76,8 @@ void APlayerCorePawn::BeginPlay()
 	// debris exception after Blueprint defaults have been applied.
 	CollisionComponent->SetCollisionResponseToChannel(ECC_Destructible, ECR_Ignore);
 
-	MovementComponent->MaxSpeed = MoveSpeed;
+	MovementComponent->MaxSpeed = MoveSpeed
+		* FMath::Max(MovementSpeedMultiplier, 0.1f);
 	BaseVisualScale = VisualMesh
 		? VisualMesh->GetRelativeScale3D()
 		: FVector::OneVector;
@@ -238,7 +239,8 @@ void APlayerCorePawn::UpdateSlimePresentation(const float DeltaTime)
 		// behind the collision body. Each compression/recovery cycle makes the
 		// low-speed glide read as liquid motion instead of a static pose.
 		const float MoveAlpha = FMath::Clamp(
-			HorizontalSpeed / FMath::Max(MoveSpeed, 1.0f),
+			HorizontalSpeed / FMath::Max(
+				MoveSpeed * MovementSpeedMultiplier, 1.0f),
 			0.0f,
 			1.0f);
 		const float CrawlFrequency = FMath::Lerp(
@@ -367,7 +369,8 @@ void APlayerCorePawn::UpdateSlimePresentation(const float DeltaTime)
 			DesiredFacing = SurfaceVelocity;
 		}
 		const float MoveAlpha = FMath::Clamp(
-			SurfaceSpeed / FMath::Max(MoveSpeed, 1.0f),
+			SurfaceSpeed / FMath::Max(
+				MoveSpeed * MovementSpeedMultiplier, 1.0f),
 			0.0f,
 			1.0f);
 		const float SuctionPulse =
@@ -531,7 +534,8 @@ void APlayerCorePawn::UpdateSlimePresentation(const float DeltaTime)
 		? FVector::VectorPlaneProject(FrameVelocity, DesiredUp)
 		: HorizontalVelocity;
 	const float MaterialMovementAlpha = FMath::Clamp(
-		MaterialMotionVelocity.Size() / FMath::Max(MoveSpeed, 1.0f),
+		MaterialMotionVelocity.Size() / FMath::Max(
+			MoveSpeed * MovementSpeedMultiplier, 1.0f),
 		0.0f,
 		1.0f);
 	UpdateSlimeMaterialParameters(

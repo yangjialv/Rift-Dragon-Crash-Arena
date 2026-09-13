@@ -193,14 +193,20 @@ void AArenaPhaseController::StartPhaseTransition()
 		this,
 		ERDCAAudioCue::PhaseTransitionStart,
 		PhaseOrigin,
-		0.62f);
+		0.88f);
+	RDCAAudio::PlayAtLocation(
+		this,
+		ERDCAAudioCue::BossRoar,
+		PhaseOrigin,
+		0.5f,
+		0.8f);
 	if (!PhaseTransitionLoopAudio)
 	{
 		PhaseTransitionLoopAudio = RDCAAudio::SpawnLoopAtLocation(
 			this,
 			ERDCAAudioCue::PhaseTransitionLoop,
 			PhaseOrigin,
-			0.45f);
+			0.62f);
 	}
 	// Blueprint calls use the normal Phase 2 duration unless the debug path
 	// explicitly supplied its temporary slow duration above.
@@ -463,7 +469,13 @@ void AArenaPhaseController::FinalizeSourceCodeVoid()
 		this,
 		ERDCAAudioCue::PhaseTransitionEnd,
 		PhaseOrigin,
-		0.65f);
+		0.88f);
+	RDCAAudio::PlayAtLocation(
+		this,
+		ERDCAAudioCue::ShockwaveRelease,
+		PhaseOrigin,
+		0.42f,
+		0.8f);
 	UpdateExpansionWaveVisual(false);
 	for (FPhaseActorPair& Pair : MappedPairs)
 	{

@@ -78,6 +78,16 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Phase Crash")
 	ECrashArcType GetPredictedArcType() const;
 
+	/**
+	 * Supplies the HUD with the same trajectory used by the real launch.
+	 * Returns true while an aim point should be presented. A short click can
+	 * therefore show its landing marker before it has produced a valid launch.
+	 */
+	bool GetAimPreview(
+		TArray<FVector>& OutWorldPoints,
+		FVector& OutLandingPoint,
+		bool& bOutHasLaunchTrajectory) const;
+
 	UFUNCTION(BlueprintPure, Category = "Phase Crash")
 	float GetMovementInputScale() const;
 
@@ -167,7 +177,7 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Drag Aim",
 		meta = (ClampMin = "0.0",
-			ToolTip = "A release below this world-space drag distance cancels the launch."))
+			ToolTip = "Drag dead zone before movement starts increasing arc height. Releasing inside it still performs a minimum-power jump."))
 	float MinimumDragDistance = 35.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Movement",
@@ -236,7 +246,9 @@ protected:
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float ChargingMovementScale = 0.35f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Debug")
+	/** Enables the in-game trajectory and landing presentation drawn by the combat HUD. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Presentation",
+		meta = (DisplayName = "Show Aim Trajectory Preview"))
 	bool bDrawDebugAim = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Gravity",
@@ -264,7 +276,6 @@ private:
 		float& OutArcHeight,
 		float& OutDuration) const;
 	FVector EvaluateTrajectory(float NormalizedTime) const;
-	void DrawTrajectoryPreview() const;
 	void TickCrash(float DeltaTime);
 	void ApplyGravity(float DeltaTime);
 	void TickRecovery(float DeltaTime);

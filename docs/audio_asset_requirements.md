@@ -57,8 +57,8 @@ Phase 2 必须继承 Phase 1 的节奏身份，不能突然变成另一套音乐
 
 ### 2.1 节奏基准
 
-- Phase 1 BGM：`132 BPM`，四分音符约 `455 ms`，八分音符约 `227 ms`；
-- Phase 2 BGM：`148 BPM`，四分音符约 `405 ms`，八分音符约 `203 ms`；
+- 主战 BGM：约 `136 BPM`，四分音符约 `441 ms`，八分音符约 `221 ms`；
+- 两个阶段继续播放同一首音乐，不改变速度或播放位置，只平滑调整音量；
 - 短操作音效控制在一个八分音符附近；关键命中可以形成“两段式”手势，但不要在单个文件里生成多次攻击；
 - 弹幕节奏必须由 UE 的实际发射事件形成。每颗弹丸只播放一次短音，禁止在一颗弹丸音效中烘焙一串连射；
 - Warning、Release、Hit 是三个不同节奏位置，必须拆成不同资产；
@@ -166,10 +166,24 @@ a short backward air trail. Clearly blocked and unsuccessful, 0.9 seconds.
 - 要求：全场最强的正反馈；必须包含撞击、核心断裂、厚玻璃爆碎、低频爆发和碎片落下，形成完整而爽快的五层结构。
 
 ```text
-A devastating critical hit on a cyber dragon: fast body impact, deep core fracture,
-thick energy glass exploding into many shards, powerful low-frequency energy burst,
-then smaller pieces scattering and ringing out. Extremely satisfying and weighty,
-1.6 seconds.
+A devastating weak-point hit on a cyber dragon: immediate body slam,
+enormous low-frequency core rupture, thick reinforced energy glass exploding,
+heavy crystalline fragments and a broad cyber energy blast. Far larger and more
+rewarding than an anchor breaking, with a long physical debris tail, 2.4 seconds.
+```
+
+#### `SFX_Boss_PainRoar`
+
+- 时机：弱点有效受击并实际扣血，但 Boss 尚未死亡；
+- 类型：Mono，由 Boss 位置进行 3D 空间化；
+- 长度：2.0～3.0 秒；
+- 要求：短促、突然、带身体后仰感的真实巨龙痛吼；不能复用 Shockwave 的主动攻击咆哮。
+
+```text
+A colossal dragon reacting to a devastating weak-point strike: abrupt involuntary
+pain roar, deep chest compression, rough throat break, heavy wounded exhale and a
+short angry growl. Believable giant creature anatomy, forceful but shorter than an
+attack roar, subtle cyber corruption, 2.6 seconds.
 ```
 
 ---
@@ -355,13 +369,15 @@ Large physical scale with a complete decay, 2.8 seconds.
 
 - 时机：Phase 2 扩散球从世界中心出现；
 - 类型：单次；
-- 长度：1.2～1.8 秒；
-- 要求：空间被打开，不使用普通爆炸。
+- 长度：2.0～3.0 秒；
+- 要求：这是整场第二大的演出节点，需要先有蓄压，再出现巨大的低频空间撕裂；
+  不能只是轻微扫描，也不能使用普通炸弹式爆炸。
 
 ```text
-A source-code conversion sphere activating at the arena center: deep system pulse,
-space folding open, green electromagnetic field expanding and surrounding arena
-matter beginning to digitize. Precise physical scale and spacious tail, 1.5 seconds.
+A colossal source-code sphere awakening: sub-bass pressure builds into a massive
+spatial rupture, green electromagnetic energy surges outward and the arena begins
+to digitize. Monumental phase-change impact, dense low-mid body, spacious tail,
+2.8 seconds.
 ```
 
 #### `SFX_PhaseTransition_Loop`
@@ -385,9 +401,10 @@ steady syncopated system pulse moving through space. No start or finish, 4 secon
 - 要求：扫描完成并稳定下来，作为 Phase 2 开始标志。
 
 ```text
-A digital world conversion completing: the expanding field reaches the horizon,
-remaining cyber matter resolves into code, a deep system lock lands, then a wide
-green data afterglow settles through the arena. Decisive completion, 1.5 seconds.
+A colossal digital conversion completes: the field reaches the horizon, cyber matter
+snaps into source code, a huge sub-bass system lock lands with mechanical resonance,
+then a wide green data afterglow settles. An unmistakable Phase 2 downbeat,
+2.2 seconds.
 ```
 
 #### `SFX_Boss_Death`
@@ -395,13 +412,14 @@ green data afterglow settles through the arena. Decisive completion, 1.5 seconds
 - 时机：Boss HP 归零并播放 Death Montage；
 - 类型：单次；
 - 长度：4.5～6.5 秒；
-- 要求：巨龙失去力量、数字核心崩溃；不要在文件中加入音乐，便于和 BGM 混合。
+- 要求：开头必须有清楚、漫长而痛苦的最终龙吼，随后才是巨龙失去力量和数字核心
+  崩溃；不能只听到机器故障。不要在文件中加入音乐，便于和 BGM 混合。
 
 ```text
-A colossal cyber dragon dying: wounded roar and failing breath, heavy wings losing
-tension, three slowing core pulses, mechanical systems collapsing, code corruption
-spreading through the body and one enormous final impact with a long decay,
-5.5 seconds.
+A colossal cyber dragon dying: a long unmistakable final agony roar with believable
+chest, throat and failing breath, heavy wings losing tension, core pulses slowing,
+systems collapsing, code corruption spreading and one enormous body impact with a
+long debris decay. Creature voice leads the sequence, 7 seconds.
 ```
 
 #### `SFX_Victory`
@@ -434,43 +452,24 @@ unresolved low chord fades into space. Restrained rather than tragic, 3 seconds.
 
 ## 4. 第一批 BGM
 
-### `BGM_Boss_Phase1`
+### `BGM_Boss_Main`
 
-- 类型：Stereo 无缝循环；
-- 长度：60～90 秒；
-- 建议速度：128～140 BPM；
-- 目的：有紧迫感，但需要给攻击预警和音效留下空间；
-- 禁止：人声、歌词、持续全频率轰炸、过多电影式环境铺垫。
-
-```text
-Original instrumental seamless-loop boss battle music for a stylized cyber-rift
-arena, 132 BPM. Rounded industrial drums, elastic electronic bass, muted mechanical
-syncopation and a simple memorable three-note dragon motif. Heavy but playful,
-clear gaps on major beats for warnings and impacts, warm low-mid mix, restrained
-cymbals and highs, no vocals, no long intro or final cadence, 75 seconds.
-```
-
-### `BGM_Boss_Phase2`
-
-- 类型：Stereo 无缝循环；
-- 长度：60～90 秒；
-- 建议速度：140～155 BPM；
-- 目的：延续 Phase 1 的节奏身份，但加入绿色源码空间、故障和失控感；
-- 最好与 Phase 1 使用相同生成工程、相同 Seed 或同一主题描述。
+- 当前来源：`audio/BGM/PYLOT - A Race Against Time.mp3`；
+- 类型：Stereo，当前 Demo 按一次性完整播放处理；
+- 长度：约 4 分 06 秒；
+- 时机：关卡开始立即以低音量播放，整个 Boss 战不中断、不切歌；
+- 目的：一首音乐覆盖开场、Phase 1、Phase 2 和血量压力变化，并给攻击预警留空间；
+- 发布要求：必须确认该商业音乐拥有游戏内使用和发布许可。
 
 ```text
-Original instrumental seamless-loop phase-two evolution of the same cyber-rift boss
-theme, 148 BPM. Preserve the three-note dragon motif and elastic bass identity,
-add denser syncopated drums, band-limited code pulses and playful binary arpeggios.
-Urgent and unstable but still warm, with deliberate gaps for attack cues,
-band-limited glitch texture, no vocals and no final cadence, 75 seconds.
+The supplied PYLOT - A Race Against Time track is the single prototype boss BGM.
+Import it as BGM_Boss_Main and keep one playback instance alive throughout the fight.
+Do not generate separate intro, Phase 1 or Phase 2 tracks. Gameplay controls only its
+volume, warning ducking and final fade-out without changing pitch or playback speed.
 ```
 
-如果 AI 无法生成真正无缝循环，至少要求：
-
-1. 开头不要使用只出现一次的长渐入；
-2. 结尾不要使用终止和弦；
-3. 保留节拍稳定的中段，后续可以人工裁切循环。
+当前曲目长度足够覆盖 Demo，暂不循环。如果后续实测单局可能超过曲目长度，再从原曲
+中人工制作循环段，不能直接从结尾跳回开头。
 
 ---
 
@@ -658,7 +657,7 @@ Seed（如果有）
 4. Barrage Charge / Shot / Player Hit；
 5. Boss Takeoff、中心盘碎裂和阶段转换；
 6. Boss Death、Victory、Defeat；
-7. Phase 1 / Phase 2 BGM；
+7. 单首 `BGM_Boss_Main`；
 8. Anchor 与环境细节。
 
 接入时需要特别处理：
@@ -674,9 +673,31 @@ Seed（如果有）
 - BGM、环境、Boss 攻击、Player 反馈和 UI 使用不同 Sound Class；
 - Warning 播放时让 BGM 短暂降低约 `2～3 dB`，不要把 Warning 本身做得更尖；
 - Boss 关键攻击使用竞技场范围内稳定可读的 3D 衰减，普通弹丸仍按距离衰减；
-- Phase 2 切换时先交叉淡化环境和 BGM，再启用更密的 Phase 2 攻击声音。
+- Phase 2 切换时保持同一首 BGM 连续播放，仅平滑调整音量，不重新开始音乐。
 
-### 8.1 推荐混音优先级
+### 8.1 BGM 动态编排
+
+```text
+关卡开始：BGM_Boss_Main 从头播放，1.5 秒淡入到 0.45
+Boss 起飞完成：平滑提升到 0.72
+Boss HP 5→4：平滑提升到 0.78
+Boss HP 4→3、扩散球开始：短暂压到 0.62，为转阶段音效让位
+扩散完成：同一播放位置平滑提升到 0.82，不重播歌曲
+Boss HP 2→1：平滑提升到 0.90，不改变播放速度或音高
+Boss/Player 死亡：战斗 BGM 在 2.5 秒内淡出到 0
+结果提示：在 BGM 已明显下降后播放 Victory 或 Defeat
+```
+
+血量只用于小幅提升音乐强度，不能每扣 1 HP 突然跳音量。Warning 期间对当前 BGM
+做约 `-3 dB`（音量乘约 `0.71`）的短暂 Duck；弱点有效命中时做约 `-2 dB`，让碎裂
+和龙痛吼清楚穿过混音。所有音量变化都作用于同一个 Audio Component，不能在转阶段
+重新生成、重播或切换另一首音乐。
+
+音量参数统一放在关卡中的 `BP_ArenaPhaseController → Arena Phase|Music`，策划可直接
+调整 Intro、Phase 1、Phase 1 Pressure、Transition、Phase 2、Critical、平滑速度和
+结算淡出时间，不需要修改 PlayerController 或重新编译。
+
+### 8.2 推荐混音优先级
 
 ```text
 失败/胜利与弱点命中
@@ -690,7 +711,7 @@ Seed（如果有）
 
 这里的优先级表示发生遮盖冲突时谁应保持清楚，不表示上层声音永远更响。最终通过 Sound Class、Concurrency 和短暂 Ducking 实现。
 
-### 8.2 当前 v0.4 接入状态
+### 8.3 当前 v0.4 接入状态
 
 2026-09-13 已将首批 30 个确认音效导入 `/Game/Audio/v0_4`，并完成第一轮 C++ 事件接线：
 

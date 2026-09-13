@@ -73,11 +73,11 @@ v0.4 默认样本分别是 Boss 起飞、Boss 咆哮、Anchor 碎裂和弱点命
 | `--batch` | 内容 | 请求数 |
 | --- | --- | ---: |
 | `samples` | 四个 v0.4 拟真基准样本 | 4 |
-| `first` | 第一批战斗音效 | 25 |
-| `music` | 两阶段音乐，每段 75 秒 | 2 |
+| `first` | 第一批战斗音效 | 26 |
+| `music` | 已使用 `audio/BGM` 中的现有曲目，不调用生成接口 | 0 |
 | `anchors` | 五种锚点音效 | 5 |
 | `details` | 环境、移动、擦弹及 UI | 10 |
-| `all` | 全部项目，包含已试听的项目 | 42 |
+| `all` | 全部需要生成的音效，包含已试听项目，不含现有 BGM | 41 |
 
 基准样本通过后生成第一批剩余音效：
 
@@ -115,17 +115,19 @@ v0.4 默认样本分别是 Boss 起飞、Boss 咆哮、Anchor 碎裂和弱点命
 
 | 文件 | 什么时候播放 | 它代表什么 | 播放规则 |
 | --- | --- | --- | --- |
-| `SFX_BossBody_Rebound` | Player 撞到 Boss 身体，得到 Rebound，但 Boss HP 没有减少 | 撞到了坚硬身体，攻击无效并被弹回 | 只在身体反弹结算时播放；不能与 WeakPoint Hit 同时播放 |
-| `SFX_WeakPoint_Hit` | Player 命中有效弱点，并且 Boss HP 实际减少 1 点 | 本轮攻击成功，是全场最强正反馈 | 只有真正扣除 Boss HP 才播放；普通重叠、眩晕开始或身体反弹不播放 |
+| `SFX_BossBody_Rebound` | Player 撞到 Boss 身体，得到 Rebound，但 Boss HP 没有减少 | 撞到了坚硬身体，攻击无效并被弹回 | 身体反弹时单独播放；弱点命中允许极低音量复用其低频冲击层 |
+| `SFX_WeakPoint_Hit` | Player 命中有效弱点，并且 Boss HP 实际减少 1 点 | 本轮攻击成功，是全场最强正反馈 | 只有真正扣除 Boss HP 才播放；当前原型叠加弱点主体、Anchor 玻璃层和低频身体层 |
+| `SFX_Boss_PainRoar` | 有效弱点扣血后且 Boss HP 仍大于 0 | 龙受到真实伤害后的痛吼 | 不与 Shockwave 主动咆哮混用；最终一击改播 Boss Death |
 
-这两个声音是互斥结果：同一次冲撞只能播放其中一个。
+两种 Gameplay 结果互斥。当前弱点临时混音会低音量复用身体音效中的低频冲击，
+但不会把它当成一次身体反弹事件；专用弱点资产通过后可移除这一临时层。
 
 ### 6.3 Shockwave
 
 | 文件 | 什么时候播放 | 它代表什么 | 播放规则 |
 | --- | --- | --- | --- |
 | `SFX_Shockwave_Warning` | Boss 进入 Roar/冲击波前摇，地面预警环出现时 | 三次低频脉冲构成攻击倒计时 | 每次 Shockwave 在前摇开始时播放一次，此时没有伤害 |
-| `SFX_Shockwave_Release` | 预警结束，火焰圆环开始扩散且伤害判定激活时 | 攻击正式释放 | 必须与半径开始扩张同一时刻播放；Phase 2 连续两次攻击分别播放一次 |
+| `SFX_Shockwave_Release` | 预警结束，火焰圆环开始扩散且伤害判定激活时 | 攻击正式释放 | Phase 2 强化版只预警一次，但 Pulse 1 与 Pulse 2 开始时各播放一次 Release |
 
 ### 6.4 Laser
 
@@ -181,7 +183,7 @@ Start → 循环 Loop 并扩张球体 → 停止 Loop + End → Phase 2 战斗
 
 | 文件 | 什么时候播放 | 它代表什么 | 播放规则 |
 | --- | --- | --- | --- |
-| `SFX_Boss_Death` | Boss HP 变成 0、Death Montage 开始时 | 巨龙失去力量和数字核心崩溃 | 立即停止所有 Boss 攻击循环后播放；这是场景内声音 |
+| `SFX_Boss_Death` | Boss HP 变成 0、Death Montage 开始时 | 最终痛吼、巨龙失去力量和数字核心崩溃 | 立即停止所有 Boss 攻击循环后播放；当前原型会叠加低音高 Boss Roar，正式资产需自带完整最终吼叫 |
 | `SFX_Victory` | Boss 死亡流程稳定、Victory 结果界面出现时 | 玩家正式获胜 | Stereo、非空间化；不要取代 Boss Death，可在其后半段进入 |
 | `SFX_Defeat` | Player HP 变成 0、Defeat 结果界面出现时 | 本局失败 | Stereo、非空间化；立即停止攻击循环和 Player 操作声 |
 

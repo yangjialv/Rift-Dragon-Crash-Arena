@@ -252,6 +252,11 @@ protected:
 		meta = (ClampMin = "1.0"))
 	float BarrageProjectileSpeed = 1600.0f;
 
+	/** Runtime multiplier applied to every barrage pattern, including saved Blueprint speed values. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Common",
+		meta = (ClampMin = "0.1", DisplayName = "Barrage Speed Multiplier"))
+	float BarrageSpeedMultiplier = 1.5f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Common",
 		meta = (ClampMin = "1"))
 	int32 BarrageProjectileDamage = 1;
@@ -306,6 +311,16 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Homing")
 	int32 HomingProjectileCount = 3;
+
+	/** Multiplies the authored count so existing Blueprint overrides are also upgraded. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Homing",
+		meta = (ClampMin = "1", DisplayName = "Homing Count Multiplier"))
+	int32 HomingCountMultiplier = 2;
+
+	/** Scales both the visual and collision of Limited Homing projectiles. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Homing",
+		meta = (ClampMin = "1.0", DisplayName = "Homing Size Multiplier"))
+	float HomingSizeMultiplier = 4.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Homing")
 	float HomingSpreadDegrees = 28.0f;
@@ -376,15 +391,33 @@ protected:
 		meta = (ClampMin = "0.1"))
 	float Phase2InterAttackDelay = 0.65f;
 
+	/** First-stage category weight. The three category weights are normalized at runtime. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Phase 2|Selection",
+		meta = (ClampMin = "0.0", DisplayName = "Phase 2 Barrage Weight"))
+	float Phase2BarrageWeight = 0.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Phase 2|Selection",
+		meta = (ClampMin = "0.0", DisplayName = "Phase 2 Shockwave Weight"))
+	float Phase2ShockwaveWeight = 0.3f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Phase 2|Selection",
+		meta = (ClampMin = "0.0", DisplayName = "Phase 2 Laser Weight"))
+	float Phase2LaserWeight = 0.2f;
+
+	/** Number of unique attacks in one Phase 2 round before immediate stun. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Phase 2",
+		meta = (ClampMin = "1", DisplayName = "Phase 2 Attacks Before Stun"))
+	int32 Phase2AttacksBeforeStun = 3;
+
 	/** Boss enters Phase 2 as soon as its HP reaches this value. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Phase 2",
 		meta = (ClampMin = "1", DisplayName = "Phase 2 Start Hit Points"))
 	int32 Phase2StartHitPoints = 3;
 
-	/** Recovery gap after the first Phase 2 shockwave, before the second warning begins. */
+	/** Release delay between the two overlapping pulses of the enhanced Phase 2 shockwave. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Phase 2",
-		meta = (ClampMin = "0.0", DisplayName = "Double Shockwave Gap"))
-	float Phase2DoubleShockwaveGap = 0.8f;
+		meta = (ClampMin = "0.0", DisplayName = "Phase 2 Shockwave Pulse Delay"))
+	float Phase2ShockwavePulseDelay = 0.28f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Phase 2",
 		meta = (ClampMin = "0.1"))
@@ -538,16 +571,26 @@ private:
 		EPlayerSpatialState PlayerState) const;
 	float GetCurrentAttackWarningDuration() const;
 	float GetCurrentAttackActiveDuration() const;
+	bool IsEnhancedDoubleShockwaveAttack() const;
 	void BeginCurrentAttackWarning();
 	void BeginCurrentAttack();
 	void FinishCurrentAttack();
+	void TickShockwaveAttack();
+	void BeginSecondShockwavePulse();
 	void UpdateShockwave(float NormalizedTime);
+	void UpdateSecondaryShockwave(float NormalizedTime);
 	float GetShockwaveExpansionDuration() const;
 	void SetShockwaveVisualRadius(float Radius);
 	void ApplyShockwaveVisualWidth(UStaticMeshComponent* Mesh, float Radius);
 	void UpdateShockwaveEditorPreviewScales();
 	void CreateShockwaveProceduralVisual();
 	void UpdateShockwaveProceduralVisual(float ConfiguredRadius);
+	void UpdateShockwaveProceduralVisualComponent(
+		UProceduralMeshComponent* Visual,
+		float ConfiguredRadius,
+		bool& bMeshBuilt,
+		int32& BuiltRadialSegments,
+		int32& BuiltTubeSegments);
 	void SetShockwaveProceduralVisualVisible(bool bVisible);
 	void SetShockwaveProceduralVisualMaterial(UMaterialInterface* Material);
 	void ResolveBossVisual();
@@ -556,7 +599,16 @@ private:
 	void CreateShockwaveCollisionSegments();
 	void UpdateShockwaveCollisionSegments(float RingCenterRadius);
 	void SetShockwaveCollisionEnabled(bool bEnabled);
-	void ApplyShockwaveOverlapDamage(AActor* OtherActor);
+	void CreateShockwaveCollisionSegmentsFor(
+		TArray<TObjectPtr<UBoxComponent>>& Segments,
+		const TCHAR* NamePrefix);
+	void UpdateShockwaveCollisionSegmentsFor(
+		TArray<TObjectPtr<UBoxComponent>>& Segments,
+		float RingCenterRadius);
+	void SetShockwaveCollisionEnabledFor(
+		TArray<TObjectPtr<UBoxComponent>>& Segments,
+		bool bEnabled);
+	void ApplyShockwaveOverlapDamage(AActor* OtherActor, bool bSecondaryPulse);
 
 	UFUNCTION()
 	void HandleShockwaveSegmentOverlap(
@@ -595,13 +647,14 @@ private:
 		EBossProjectileMotionMode MotionMode,
 		float CurveRate = 0.0f,
 		float MaxCurve = 0.0f,
-		AActor* HomingTarget = nullptr);
+		AActor* HomingTarget = nullptr,
+		float SizeMultiplier = 1.0f);
 	int32 GetBarrageStepCount() const;
 	float GetBarrageStepInterval() const;
 	float GetBarrageAttackDuration() const;
 	bool IsWideBarragePattern(EBossBarragePattern Pattern) const;
-	void SelectPhase2Combo();
-	void BeginPhase2SecondAttack();
+	void SelectPhase2RoundAttack();
+	void ResetPhase2Round();
 	void SpawnLaserWarning();
 	void UpdateBossFacing(float DeltaTime);
 	void UpdateLaserWarning();
@@ -627,13 +680,20 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UProceduralMeshComponent> ShockwaveProceduralVisual;
 	UPROPERTY(Transient)
+	TObjectPtr<UProceduralMeshComponent> SecondaryShockwaveProceduralVisual;
+	UPROPERTY(Transient)
 	TArray<TObjectPtr<UBoxComponent>> ShockwaveCollisionSegments;
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UBoxComponent>> SecondaryShockwaveCollisionSegments;
 	FVector ShockwaveBaseScale = FVector::OneVector;
 	float ShockwaveBaseWorldRadius = 50.0f;
 	float ShockwaveWorldUnitsPerConfiguredUnit = 1.0f;
 	bool bShockwaveProceduralMeshBuilt = false;
 	int32 BuiltShockwaveVisualRadialSegments = 0;
 	int32 BuiltShockwaveVisualTubeSegments = 0;
+	bool bSecondaryShockwaveProceduralMeshBuilt = false;
+	int32 BuiltSecondaryShockwaveVisualRadialSegments = 0;
+	int32 BuiltSecondaryShockwaveVisualTubeSegments = 0;
 	EBossEncounterState EncounterState = EBossEncounterState::Idle;
 	EBossCombatPhase CombatPhase = EBossCombatPhase::Phase1;
 	EBossAttackType CurrentAttack = EBossAttackType::None;
@@ -650,6 +710,8 @@ private:
 	float StateElapsed = 0.0f;
 	float PreviousShockwaveRadius = 0.0f;
 	bool bPlayerDamagedThisAttack = false;
+	bool bPlayerDamagedBySecondaryShockwave = false;
+	int32 ActiveShockwavePulse = 0;
 	bool bBossPhaseMaterialApplied = false;
 	EBossCombatPhase LastAppliedBossMaterialPhase = EBossCombatPhase::Dead;
 	bool bEncounterStopped = false;
@@ -659,15 +721,10 @@ private:
 		EBossBarragePattern::PredictiveVolley;
 	int32 BarrageStepsFired = 0;
 	float BarrageStepElapsed = 0.0f;
-	bool bPhase2ComboActive = false;
-	EBossPhase2Sequence ActivePhase2Sequence =
-		EBossPhase2Sequence::DoubleShockwave;
-	int32 Phase2ComboStep = 0;
+	bool bCurrentPhase2DoubleShockwave = false;
+	TSet<int32> Phase2UsedAttackKeys;
 	EBossBarragePattern PreviousBarragePattern =
 		EBossBarragePattern::PredictiveVolley;
 	bool bHasPreviousBarragePattern = false;
-	EBossBarragePattern PreviousSpecialOpeningPattern =
-		EBossBarragePattern::CurvedVolley;
-	bool bHasPreviousSpecialOpeningPattern = false;
 	TWeakObjectPtr<ABossSweepLaser> ActiveSweepLaser;
 };

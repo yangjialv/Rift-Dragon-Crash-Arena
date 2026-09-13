@@ -70,7 +70,7 @@ C++ 通用状态机
 |---|---:|---:|---|
 | Phase 1 | 5～4 | 2 次 | 教学单项攻击与基础躲避 |
 | Phase 2 | 3～1 | 3 次 | 使用双攻击和复杂弹幕组合 |
-| Dead | 0 | — | 停止攻击并进入 Victory |
+| Dead | 0 | — | 停止攻击，Player 回到安全地面后进入 Victory |
 
 `Phase 2 Start Hit Points` 默认是 3。Boss 在弱点命中后 HP 变为 3 的同一时刻
 进入 Phase 2，使竞技场空间扩散能够立即响应。
@@ -210,70 +210,62 @@ Predictive Triple Volley 或 Gap Barrage Wall
 
 ## 8. Phase 2 正式编排
 
-Phase 2 包含三个弱点循环。每轮完整组合结束后暴露弱点，不在组合中间暴露。
+Phase 2 改为随机轮次制。每轮抽取三种不同的具体攻击，第三次攻击完成后立即暴露
+弱点。弹幕的不同 Pattern 分别视为不同攻击，因此一轮可以出现两种弹幕，但同一个
+Pattern 不会重复。
 
-### 8.1 第一轮：Double Shockwave
+当前 Phase 2 攻击池：
+
+- Enhanced Double Shockwave；
+- Sweep Laser；
+- Curved Spin Volley；
+- Limited Homing Volley；
+- Rotating Gap Barrage；
+- Double Spiral Barrage；
+- Legacy Dense Fan。
+
+每次选择先按大类权重抽取：`Barrage = 0.5`、`Enhanced Shockwave = 0.3`、
+`Sweep Laser = 0.2`。抽中 Barrage 后，再在五种 Phase 2 弹幕 Pattern 中等概率
+选择一种。这样五种弹幕共同占 50%，不会分别与 Shockwave、Laser 竞争而稀释它们。
+
+每轮从可用池中抽取三个不重复项目。Shockwave 和 Laser 在一轮内各最多出现一次；
+Barrage 可以出现多次，但每次必须使用尚未出现的 Pattern。某个类别没有可用项目时，
+其余类别权重自动重新归一化。轮次示例：
 
 ```text
-Shockwave 1 Warning
-→ Shockwave 1 Active
-→ Double Shockwave Gap
-→ Shockwave 2 Warning
-→ Shockwave 2 Active
-→ WeakPointExposed
-→ 有效重撞：Boss 3 HP → 2 HP
-```
-
-默认 `Double Shockwave Gap = 0.8` 秒。间隔从第一道冲击波结束后开始计算，
-第二道冲击波仍播放完整预警。
-
-第一版两道冲击波使用相同的初始半径、最终半径、扩散速度、视觉宽度、判定宽度
-和判定高度。每次冲击波独立重置本轮伤害记录。玩家可以分别被两道波命中，但仍受
-全局受击无敌时间保护。必须确认跳跃恢复和冷却允许连续躲避。
-
-### 8.2 第二轮：空间封锁接激光
-
-```text
-Rotating Gap Barrage 或 Legacy Dense Fan
+Limited Homing Volley
+→ Phase 2 Inter Attack Delay
+→ Enhanced Double Shockwave
 → Phase 2 Inter Attack Delay
 → Sweep Laser
-→ WeakPointExposed
-→ 有效重撞：Boss 2 HP → 1 HP
+→ 立即 WeakPointExposed
 ```
 
-第一段迫使玩家离开原位置，第二段激光检验玩家是否读懂警戒区域。
+### 8.1 Enhanced Double Shockwave
 
-### 8.3 第三轮：特殊弹幕终局
+二重 Shockwave 在随机池中只算一种、一次攻击行为：只播放一次 Roar、一次前摇和
+一次 Warning。Pulse 1 开始后默认 `0.28` 秒释放 Pulse 2，此时第一道波仍在扩散；
+两道波结束以后才算该攻击完成。
 
-```text
-Curved Spin Volley 或 Limited Homing Volley
-→ Phase 2 Inter Attack Delay
-→ Double Spiral Barrage
-→ WeakPointExposed
-→ 有效重撞：Boss 1 HP → 0 HP
-→ Boss Death / Victory
-```
+两道波使用相同的初始半径、最终半径、扩散速度、视觉宽度、判定宽度和判定高度，
+分别拥有命中资格，但仍服从 Player 的全局受击无敌时间。
 
-第一段在曲线和有限追踪之间随机选择，第二段固定为双螺旋，形成明确的最终轮次。
+### 8.2 攻击结束与眩晕衔接
 
-### 8.4 攻击结束与眩晕衔接
+`Phase 2 Attacks Before Stun = 3`。前两次攻击之间保留
+`Phase 2 Inter Attack Delay`；第三次攻击的 Active 阶段一结束，状态机直接从
+`Attacking` 进入 `WeakPointExposed`，不经过 `Recovery`，也不等待 Inter Attack
+Delay。激光最后收招时，Boss 高度恢复与眩晕并行，不能推迟弱点窗口。
 
-如果当前攻击是本轮最后一次攻击，攻击 Active 结束后直接进入
-`WeakPointExposed`，不再额外等待通用 `Recovery Duration`。普通攻击之间和
-Phase 2 组合的两段攻击之间仍保留原有 Recovery / Inter Attack Delay。
-
-激光作为本轮最后一次攻击时，眩晕立即开始；Boss 的高度恢复与眩晕并行完成，
-不能为了升回原高度推迟弱点窗口。
-
-### 8.5 错过弱点窗口
+### 8.3 错过弱点窗口
 
 玩家错过弱点窗口时：
 
 1. Boss HP 不变；
 2. 战斗不会锁死；
-3. 当前 HP 对应的阶段轮次重新执行；
-4. 二选一弹幕槽位优先换用另一个模式；
-5. 不跳过当前轮次，也不提前降低 Boss HP。
+3. 清空本轮使用记录并重新随机抽取三种攻击；
+4. 新一轮内部仍保证攻击方式不重复；
+5. 不提前降低 Boss HP。
 
 ---
 
@@ -284,7 +276,7 @@ Phase 2 组合的两段攻击之间仍保留原有 Recovery / Inter Attack Delay
 - 固定使用 `Shockwave World Anchor` 作为世界空间圆心；
 - 只伤害判定高度内的玩家；
 - 不追踪玩家，不影响 Anchor；
-- Phase 1 单次释放，Phase 2 第一轮连续释放两次；
+- Phase 1 单次释放；Phase 2 抽到该攻击时连续释放两道波；
 - 火焰 Torus 的半径、宽度和高度与伤害判定对应。
 
 ### 9.2 Barrage
@@ -316,7 +308,8 @@ Phase 2 组合的两段攻击之间仍保留原有 Recovery / Inter Attack Delay
 
 ### Phase 2
 
-- 一个完整组合结束后暴露；
+- 每轮三次不重复攻击完成后暴露；
+- 第三次攻击 Active 结束后立即暴露，不经过 Recovery；
 - 基础暴露时间 `2.25` 秒；
 - 乘以当前倍率后，实际为 4.5 秒。
 
@@ -345,9 +338,19 @@ Phase 2 Start Hit Points = 3
 Phase 1 Attacks Before Exposure = 2
 Phase 1 Base Weak Point Exposure = 3.0 s
 
+Phase 2 Attacks Before Stun = 3
 Phase 2 Inter Attack Delay = 0.65 s
-Double Shockwave Gap = 0.8 s
+Phase 2 Shockwave Pulse Delay = 0.28 s
 Phase 2 Base Weak Point Exposure = 2.25 s
+Phase 2 Barrage Weight = 0.5
+Phase 2 Shockwave Weight = 0.3
+Phase 2 Laser Weight = 0.2
+
+Player Movement Speed Multiplier = 1.5
+Barrage Speed Multiplier = 1.5
+Homing Count Multiplier = 2
+Homing Size Multiplier = 4.0
+Weak Point Impact Volume Multiplier = 4.0
 
 Weak Point Stun Duration Multiplier = 2.0
 Player Invulnerability Duration = 1.0 s
@@ -364,6 +367,17 @@ Attack Selection Random Seed = -1
 若现有 Blueprint 保存过旧默认值，需要在组件 Details 中确认 Player HP、Boss HP
 和阶段阈值实际显示为 `5 / 5 / 3`。C++ 默认值改变不应被误认为一定覆盖所有已保存
 Blueprint 实例配置。
+
+### 11.1 战斗音频节奏
+
+- 有效弱点命中必须强于 Anchor 碎裂：先出现清楚的重击与厚玻璃破裂，随后由 Boss
+  位置播放受伤痛吼；Boss HP 归零时不播普通痛吼，改为完整死亡吼叫；
+- 转阶段的 Start、持续 Loop 和 End 是一个完整句子。Start 建立巨大空间压力，End
+  落在 Phase 2 的重拍，不能只是一个轻微电子提示音；
+- Phase 2 强化 Shockwave 只播放一次 Warning；两道 Pulse 各在真实扩散开始时播放
+  一次 Release，第二声可略高音高，使玩家听出“第二道波”而不是攻击重开；
+- 全程只使用一首 `BGM_Boss_Main`。开场低音量淡入，起飞后进入正常音量，Phase 2
+  和低血量时平滑增强；不能切歌、重播或改变速度，结算时在约 2.5 秒内淡出。
 
 ---
 
@@ -394,8 +408,8 @@ Boss HP 从 4 降到 3、正式进入 Phase 2 时触发。
 Phase 1 选择日志至少记录 Boss HP、Round、Step、Player Spatial State、
 Current Attack、Barrage Pattern、Previous Attack 和 Random Seed。
 
-Phase 2 选择日志至少记录 Boss HP、Phase 2 Round、Sequence、Combo Step、
-Current Attack、Barrage Pattern、Locked Target 和 Random Seed。
+Phase 2 选择日志至少记录当前轮次 Step、具体攻击 Key、Current Attack、
+Barrage Pattern、本轮已用数量、Locked Target 和 Random Seed。
 
 ---
 
@@ -408,7 +422,7 @@ Current Attack、Barrage Pattern、Locked Target 和 Random Seed。
 - [ ] 前两次有效重撞发生在 Phase 1；
 - [ ] Boss 从 4 HP 降到 3 HP 时开始场景扩散；
 - [ ] Phase 2 需要三次有效重撞才会死亡；
-- [ ] Boss 0 HP 后进入死亡和 Victory。
+- [ ] Boss 0 HP 后立即停止攻击，Player 回到环形地面后再显示 Victory。
 
 ### Phase 1
 
@@ -420,12 +434,16 @@ Current Attack、Barrage Pattern、Locked Target 和 Random Seed。
 
 ### Phase 2
 
-- [ ] 第一轮完整执行两次 Shockwave；
-- [ ] 两次 Shockwave 各有独立预警和伤害判定；
-- [ ] 双 Shockwave 之间存在可调间隔；
-- [ ] 第二轮是 Rotating Gap/Dense Fan → Sweep Laser；
-- [ ] 第三轮是 Curved/Homing → Double Spiral；
-- [ ] 每个完整组合结束后暴露弱点；
+- [ ] 每轮正好完成三次攻击后进入 WeakPointExposed；
+- [ ] 第一层类别概率约为 Barrage 50% / Shockwave 30% / Laser 20%；
+- [ ] 抽中 Barrage 后才进行第二层 Pattern 随机；
+- [ ] 同一轮不会重复 Shockwave、Laser 或相同弹幕 Pattern；
+- [ ] Enhanced Shockwave 在同一次攻击状态中连续扩散两道波；
+- [ ] 两道波只共用一次预警，但分别拥有独立伤害资格；
+- [ ] 第二道波按 `Phase 2 Shockwave Pulse Delay` 提前释放，与第一道波同时存在；
+- [ ] 第三次攻击结束后直接眩晕，不插入 Recovery；
+- [ ] 追踪弹数量为原配置 2 倍，显示和碰撞尺寸为原配置 4 倍；
+- [ ] 所有弹幕实际移动速度为原配置 1.5 倍；
 - [ ] 错过弱点不会让战斗卡死。
 
 ### 安全与收尾

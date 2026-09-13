@@ -43,6 +43,7 @@ const TCHAR* GetAssetPath(const ERDCAAudioCue Cue)
 	case ERDCAAudioCue::BossDeath: return TEXT("/Game/Audio/v0_4/SFX_Boss_Death.SFX_Boss_Death");
 	case ERDCAAudioCue::Victory: return TEXT("/Game/Audio/v0_4/SFX_Victory.SFX_Victory");
 	case ERDCAAudioCue::Defeat: return TEXT("/Game/Audio/v0_4/SFX_Defeat.SFX_Defeat");
+	case ERDCAAudioCue::BossMusicMain: return TEXT("/Game/Audio/BGM/BGM_Boss_Main.BGM_Boss_Main");
 	default: return nullptr;
 	}
 }
@@ -105,6 +106,33 @@ void RDCAAudio::Play2D(
 				WorldContextObject, Sound, Volume, Pitch);
 		}
 	}
+}
+
+UAudioComponent* RDCAAudio::Spawn2D(
+	const UObject* WorldContextObject,
+	const ERDCAAudioCue Cue,
+	const float Volume,
+	const float Pitch,
+	const bool bLoop)
+{
+	USoundBase* Sound = WorldContextObject ? Load(Cue) : nullptr;
+	if (!Sound)
+	{
+		return nullptr;
+	}
+	if (USoundWave* Wave = Cast<USoundWave>(Sound))
+	{
+		Wave->bLooping = bLoop;
+	}
+	return UGameplayStatics::SpawnSound2D(
+		WorldContextObject,
+		Sound,
+		Volume,
+		Pitch,
+		0.0f,
+		nullptr,
+		false,
+		false);
 }
 
 UAudioComponent* RDCAAudio::SpawnLoopAttached(

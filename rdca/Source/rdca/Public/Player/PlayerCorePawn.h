@@ -139,6 +139,11 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Movement", meta = (ClampMin = "0.0"))
 	float MoveSpeed = 600.0f;
 
+	/** Applied after Blueprint defaults so existing Player assets also receive the new pace. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Movement",
+		meta = (ClampMin = "0.1", DisplayName = "Movement Speed Multiplier"))
+	float MovementSpeedMultiplier = 1.5f;
+
 	/** Begins blending away from Near Camera Point at this player-to-Boss distance. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Player|Camera|Two Point",
 		meta = (ClampMin = "0.0"))

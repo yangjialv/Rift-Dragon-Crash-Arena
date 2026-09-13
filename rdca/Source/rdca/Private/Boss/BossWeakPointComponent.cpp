@@ -51,6 +51,8 @@ bool UBossWeakPointComponent::ReceiveCrash(
 
 	if (bWasEffective)
 	{
+		const float ImpactVolume = FMath::Max(
+			WeakPointImpactVolumeMultiplier, 0.0f);
 		CurrentHitPoints = FMath::Max(
 			CurrentHitPoints - FMath::Max(DamagePerQualifiedCrash, 1),
 			0);
@@ -59,7 +61,30 @@ bool UBossWeakPointComponent::ReceiveCrash(
 			this,
 			ERDCAAudioCue::WeakPointHit,
 			Hit.ImpactPoint,
-			0.8f);
+			0.95f * ImpactVolume);
+		// A qualified weak-point crash needs to sit above an ordinary Anchor
+		// fracture in the mix: glass/transient, low body impact, then Boss pain.
+		RDCAAudio::PlayAtLocation(
+			this,
+			ERDCAAudioCue::AnchorShatter,
+			Hit.ImpactPoint,
+			0.58f * ImpactVolume,
+			0.88f);
+		RDCAAudio::PlayAtLocation(
+			this,
+			ERDCAAudioCue::BossBodyRebound,
+			Hit.ImpactPoint,
+			0.38f * ImpactVolume,
+			0.72f);
+		if (!IsBossDefeated())
+		{
+			RDCAAudio::PlayAtLocation(
+				this,
+				ERDCAAudioCue::BossRoar,
+				GetOwner()->GetActorLocation(),
+				0.62f,
+				0.9f);
+		}
 	}
 	else
 	{
