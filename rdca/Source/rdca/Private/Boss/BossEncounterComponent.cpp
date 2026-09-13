@@ -1,5 +1,6 @@
 #include "Boss/BossEncounterComponent.h"
 
+#include "Audio/RDCAAudio.h"
 #include "Boss/BossWeakPointComponent.h"
 #include "Boss/BossFanProjectile.h"
 #include "Boss/BossSweepLaser.h"
@@ -499,6 +500,11 @@ void UBossEncounterComponent::SetEncounterState(
 	}
 	else if (NewState == EBossEncounterState::Dead)
 	{
+		RDCAAudio::PlayAtLocation(
+			this,
+			ERDCAAudioCue::BossDeath,
+			GetOwner()->GetActorLocation(),
+			0.72f);
 		FinishCurrentAttack();
 	}
 
@@ -526,7 +532,11 @@ void UBossEncounterComponent::HandleWeakPointCrash(
 	// One exposure represents one Boss HP opportunity. Closing it immediately
 	// prevents multiple Anchors from removing several HP during the same stun.
 	CompletedAttacksSinceExposure = 0;
-	if (WeakPoint.IsValid() && !WeakPoint->IsBossDefeated())
+	if (WeakPoint.IsValid() && WeakPoint->IsBossDefeated())
+	{
+		SetEncounterState(EBossEncounterState::Dead);
+	}
+	else if (WeakPoint.IsValid())
 	{
 		SetEncounterState(EBossEncounterState::Idle);
 	}
@@ -744,6 +754,24 @@ float UBossEncounterComponent::GetCurrentAttackActiveDuration() const
 
 void UBossEncounterComponent::BeginCurrentAttackWarning()
 {
+	if (CurrentAttack == EBossAttackType::Shockwave)
+	{
+		const FVector Origin = GetShockwaveOriginLocation();
+		RDCAAudio::PlayAtLocation(
+			this, ERDCAAudioCue::BossRoar, GetOwner()->GetActorLocation(), 0.68f);
+		RDCAAudio::PlayAtLocation(
+			this, ERDCAAudioCue::ShockwaveWarning, Origin, 0.55f);
+	}
+	else if (CurrentAttack == EBossAttackType::AimedVolley
+		|| CurrentAttack == EBossAttackType::FanBarrage)
+	{
+		RDCAAudio::PlayAtLocation(
+			this,
+			ERDCAAudioCue::BarrageCharge,
+			GetProjectileOriginLocation(),
+			0.5f);
+	}
+
 	if (ShockwaveVisual.IsValid())
 	{
 		const bool bShockwave = CurrentAttack == EBossAttackType::Shockwave;
@@ -789,6 +817,11 @@ void UBossEncounterComponent::BeginCurrentAttack()
 	switch (CurrentAttack)
 	{
 	case EBossAttackType::Shockwave:
+		RDCAAudio::PlayAtLocation(
+			this,
+			ERDCAAudioCue::ShockwaveRelease,
+			GetShockwaveOriginLocation(),
+			0.65f);
 		PreviousShockwaveRadius = FMath::Min(
 			ShockwaveInitialRadius,
 			ShockwaveExpandedMaximumRadius);
@@ -1417,6 +1450,7 @@ void UBossEncounterComponent::SpawnSharedBarrageProjectile(
 			MaximumHomingAngle);
 		Projectile->SetCodePhaseVisual(
 			GetCombatPhase() == EBossCombatPhase::Phase2);
+		RDCAAudio::PlayNextBarrageShot(this, SpawnLocation);
 	}
 }
 

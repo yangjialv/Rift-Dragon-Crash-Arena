@@ -1,7 +1,9 @@
 #include "Arena/ArenaPhaseController.h"
 
+#include "Audio/RDCAAudio.h"
 #include "Boss/BossEncounterComponent.h"
 #include "Components/ActorComponent.h"
+#include "Components/AudioComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "EngineUtils.h"
@@ -93,6 +95,15 @@ void AArenaPhaseController::BeginPlay()
 	}
 }
 
+void AArenaPhaseController::EndPlay(
+	const EEndPlayReason::Type EndPlayReason)
+{
+	UAudioComponent* Loop = PhaseTransitionLoopAudio.Get();
+	RDCAAudio::StopLoop(Loop, 0.03f);
+	PhaseTransitionLoopAudio = Loop;
+	Super::EndPlay(EndPlayReason);
+}
+
 void AArenaPhaseController::Tick(const float DeltaTime)
 {
 	Super::Tick(DeltaTime);
@@ -178,6 +189,19 @@ void AArenaPhaseController::StartPhaseTransition()
 	bTransitionActive = true;
 	TransitionElapsed = 0.0f;
 	CurrentRadius = 0.0f;
+	RDCAAudio::PlayAtLocation(
+		this,
+		ERDCAAudioCue::PhaseTransitionStart,
+		PhaseOrigin,
+		0.62f);
+	if (!PhaseTransitionLoopAudio)
+	{
+		PhaseTransitionLoopAudio = RDCAAudio::SpawnLoopAtLocation(
+			this,
+			ERDCAAudioCue::PhaseTransitionLoop,
+			PhaseOrigin,
+			0.45f);
+	}
 	// Blueprint calls use the normal Phase 2 duration unless the debug path
 	// explicitly supplied its temporary slow duration above.
 	if (ActiveExpansionDuration <= 0.0f)
@@ -432,6 +456,14 @@ void AArenaPhaseController::RevealPair(FPhaseActorPair& Pair)
 
 void AArenaPhaseController::FinalizeSourceCodeVoid()
 {
+	UAudioComponent* Loop = PhaseTransitionLoopAudio.Get();
+	RDCAAudio::StopLoop(Loop, 0.12f);
+	PhaseTransitionLoopAudio = Loop;
+	RDCAAudio::PlayAtLocation(
+		this,
+		ERDCAAudioCue::PhaseTransitionEnd,
+		PhaseOrigin,
+		0.65f);
 	UpdateExpansionWaveVisual(false);
 	for (FPhaseActorPair& Pair : MappedPairs)
 	{

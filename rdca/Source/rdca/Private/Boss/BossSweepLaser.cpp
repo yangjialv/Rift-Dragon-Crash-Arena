@@ -1,8 +1,10 @@
 #include "Boss/BossSweepLaser.h"
 
+#include "Audio/RDCAAudio.h"
 #include "Arena/AnchorOverloadComponent.h"
 #include "Arena/ArenaFloorCollision.h"
 #include "Components/BoxComponent.h"
+#include "Components/AudioComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -191,6 +193,12 @@ ABossSweepLaser::ABossSweepLaser()
 	UpdateComponentDimensions();
 }
 
+void ABossSweepLaser::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	FinishLaserAudio(bLaserActive || LaserLoopAudio != nullptr);
+	Super::EndPlay(EndPlayReason);
+}
+
 void ABossSweepLaser::InitializeLaser(
 	const float NewStartYaw,
 	const float NewEndYaw,
@@ -217,11 +225,17 @@ void ABossSweepLaser::InitializeLaser(
 		GroundWarningVisual->SetMaterial(0, Warning);
 	}
 	UpdateGroundWarningVisual();
+	RDCAAudio::PlayAtLocation(
+		this,
+		ERDCAAudioCue::LaserWarning,
+		GetActorLocation(),
+		0.52f);
 }
 
 void ABossSweepLaser::ActivateLaser()
 {
 	bLaserActive = true;
+	bLaserEndAudioPlayed = false;
 	SweepElapsed = 0.0f;
 	DamagedActors.Reset();
 	GroundWarningVisual->SetVisibility(false, true);
@@ -240,6 +254,18 @@ void ABossSweepLaser::ActivateLaser()
 	if (LaserEffect->GetAsset())
 	{
 		LaserEffect->Activate(true);
+	}
+	RDCAAudio::PlayAtLocation(
+		this,
+		ERDCAAudioCue::LaserIgnite,
+		GetActorLocation(),
+		0.62f);
+	if (!LaserLoopAudio)
+	{
+		LaserLoopAudio = RDCAAudio::SpawnLoopAttached(
+			ERDCAAudioCue::LaserLoop,
+			BeamRoot,
+			0.46f);
 	}
 
 	TArray<AActor*> InitiallyOverlappingActors;
@@ -364,6 +390,25 @@ void ABossSweepLaser::Tick(const float DeltaTime)
 	if (Alpha >= 1.0f)
 	{
 		bLaserActive = false;
+		DamageVolume->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		LaserEffect->Deactivate();
+		FinishLaserAudio(true);
+	}
+}
+
+void ABossSweepLaser::FinishLaserAudio(const bool bPlayEndCue)
+{
+	UAudioComponent* Loop = LaserLoopAudio.Get();
+	RDCAAudio::StopLoop(Loop, 0.08f);
+	LaserLoopAudio = Loop;
+	if (bPlayEndCue && !bLaserEndAudioPlayed)
+	{
+		bLaserEndAudioPlayed = true;
+		RDCAAudio::PlayAtLocation(
+			this,
+			ERDCAAudioCue::LaserEnd,
+			GetActorLocation(),
+			0.55f);
 	}
 }
 

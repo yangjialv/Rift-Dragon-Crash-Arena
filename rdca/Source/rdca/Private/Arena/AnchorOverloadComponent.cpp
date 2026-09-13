@@ -1,9 +1,11 @@
 #include "Arena/AnchorOverloadComponent.h"
 
+#include "Audio/RDCAAudio.h"
 #include "Arena/AttachSurfaceComponent.h"
 #include "Arena/AnchorSpawnManager.h"
 #include "Arena/ArenaPhaseController.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/AudioComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/Pawn.h"
 #include "Materials/MaterialInterface.h"
@@ -57,6 +59,15 @@ void UAnchorOverloadComponent::BeginPlay()
 	UpdatePhaseVisual();
 }
 
+void UAnchorOverloadComponent::EndPlay(
+	const EEndPlayReason::Type EndPlayReason)
+{
+	UAudioComponent* Loop = OverloadLoopAudio.Get();
+	RDCAAudio::StopLoop(Loop, 0.03f);
+	OverloadLoopAudio = Loop;
+	Super::EndPlay(EndPlayReason);
+}
+
 void UAnchorOverloadComponent::TickComponent(
 	const float DeltaTime,
 	const ELevelTick TickType,
@@ -81,6 +92,13 @@ void UAnchorOverloadComponent::TickComponent(
 			FMath::Max(SafeAttachmentDuration + WarningDuration, 0.1f);
 		AddOverloadAmount(DeltaTime / FullAttachmentDuration);
 	}
+	if (OverloadLoopAudio)
+	{
+		OverloadLoopAudio->SetVolumeMultiplier(
+			FMath::Lerp(0.22f, 0.62f, CurrentOverloadAlpha));
+		OverloadLoopAudio->SetPitchMultiplier(
+			FMath::Lerp(0.88f, 1.14f, CurrentOverloadAlpha));
+	}
 }
 
 void UAnchorOverloadComponent::NotifyPlayerAttached(APawn* PlayerPawn)
@@ -90,6 +108,22 @@ void UAnchorOverloadComponent::NotifyPlayerAttached(APawn* PlayerPawn)
 		return;
 	}
 
+	if (AttachedPlayer.Get() != PlayerPawn)
+	{
+		RDCAAudio::PlayAtLocation(
+			this,
+			ERDCAAudioCue::AnchorAttach,
+			GetOwner()->GetActorLocation(),
+			0.58f);
+		if (!OverloadLoopAudio && GetOwner()->GetRootComponent())
+		{
+			OverloadLoopAudio = RDCAAudio::SpawnLoopAttached(
+				ERDCAAudioCue::AnchorOverloadLoop,
+				GetOwner()->GetRootComponent(),
+				0.22f,
+				0.88f);
+		}
+	}
 	AttachedPlayer = PlayerPawn;
 }
 
@@ -101,6 +135,9 @@ void UAnchorOverloadComponent::NotifyPlayerDetached(APawn* PlayerPawn)
 	}
 
 	AttachedPlayer.Reset();
+	UAudioComponent* Loop = OverloadLoopAudio.Get();
+	RDCAAudio::StopLoop(Loop);
+	OverloadLoopAudio = Loop;
 }
 
 float UAnchorOverloadComponent::GetWarningRemainingTime() const
@@ -180,6 +217,14 @@ void UAnchorOverloadComponent::ShatterAfterPlayerDeparture()
 	}
 
 	AttachedPlayer.Reset();
+	UAudioComponent* Loop = OverloadLoopAudio.Get();
+	RDCAAudio::StopLoop(Loop, 0.03f);
+	OverloadLoopAudio = Loop;
+	RDCAAudio::PlayAtLocation(
+		this,
+		ERDCAAudioCue::AnchorLaunch,
+		GetOwner()->GetActorLocation(),
+		0.6f);
 	TriggerOverload(false);
 }
 
@@ -187,6 +232,14 @@ void UAnchorOverloadComponent::TriggerOverload(
 	const bool bDamageAttachedPlayer)
 {
 	APawn* PlayerPawn = AttachedPlayer.Get();
+	UAudioComponent* Loop = OverloadLoopAudio.Get();
+	RDCAAudio::StopLoop(Loop, 0.03f);
+	OverloadLoopAudio = Loop;
+	RDCAAudio::PlayAtLocation(
+		this,
+		ERDCAAudioCue::AnchorShatter,
+		GetOwner()->GetActorLocation(),
+		0.68f);
 	SetOverloadState(EAnchorOverloadState::Recovering);
 	SetAnchorAvailable(false);
 
@@ -261,6 +314,11 @@ void UAnchorOverloadComponent::FinishRecovery()
 	SpawnedFractureActor.Reset();
 	CurrentOverloadAlpha = 0.0f;
 	SetAnchorAvailable(true);
+	RDCAAudio::PlayAtLocation(
+		this,
+		ERDCAAudioCue::AnchorEmerge,
+		GetOwner()->GetActorLocation(),
+		0.55f);
 	SetOverloadState(EAnchorOverloadState::Normal);
 }
 

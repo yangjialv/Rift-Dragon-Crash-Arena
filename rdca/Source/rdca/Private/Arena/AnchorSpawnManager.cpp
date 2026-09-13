@@ -1,5 +1,6 @@
 #include "Arena/AnchorSpawnManager.h"
 
+#include "Audio/RDCAAudio.h"
 #include "Arena/ArenaFloorCollision.h"
 #include "Arena/AttachSurfaceComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -297,6 +298,11 @@ bool AAnchorSpawnManager::SpawnAnchorAtTransform(
 		SpawnedAnchor->SetActorTransform(FinalTransform);
 		SetAnchorInteractionEnabled(*SpawnedAnchor, true);
 	}
+	RDCAAudio::PlayAtLocation(
+		this,
+		ERDCAAudioCue::AnchorEmerge,
+		FinalTransform.GetLocation(),
+		0.55f);
 
 	UE_LOG(
 		LogRDCAPlayer,

@@ -5,6 +5,7 @@
 #include "ArenaPhaseController.generated.h"
 
 class UBossEncounterComponent;
+class UAudioComponent;
 class UMaterialParameterCollection;
 class UStaticMeshComponent;
 
@@ -22,6 +23,7 @@ public:
 	AArenaPhaseController();
 
 	virtual void Tick(float DeltaTime) override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	UFUNCTION(BlueprintCallable, Category = "Arena Phase")
 	void StartPhaseTransition();
@@ -172,4 +174,5 @@ private:
 	bool bTransitionActive = false;
 	bool bTransitionComplete = false;
 	bool bDebugTransitionPending = false;
+	TObjectPtr<UAudioComponent> PhaseTransitionLoopAudio;
 };

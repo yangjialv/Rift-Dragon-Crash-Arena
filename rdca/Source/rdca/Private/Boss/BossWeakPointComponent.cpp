@@ -1,5 +1,6 @@
 #include "Boss/BossWeakPointComponent.h"
 
+#include "Audio/RDCAAudio.h"
 #include "GameFramework/Pawn.h"
 #include "rdca.h"
 
@@ -54,6 +55,19 @@ bool UBossWeakPointComponent::ReceiveCrash(
 			CurrentHitPoints - FMath::Max(DamagePerQualifiedCrash, 1),
 			0);
 		OnHitPointsChanged.Broadcast(CurrentHitPoints, MaximumHitPoints);
+		RDCAAudio::PlayAtLocation(
+			this,
+			ERDCAAudioCue::WeakPointHit,
+			Hit.ImpactPoint,
+			0.8f);
+	}
+	else
+	{
+		RDCAAudio::PlayAtLocation(
+			this,
+			ERDCAAudioCue::BossBodyRebound,
+			Hit.ImpactPoint,
+			0.55f);
 	}
 
 	OnWeakPointCrash.Broadcast(CrashingPawn, bWasEffective, Hit);

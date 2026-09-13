@@ -29,6 +29,11 @@ rdca/Content/__ExternalActors__/ThirdPerson/Maps/ThirdPersonMap/D/SY/Z4CTQ4LG3YV
 **/Backup/
 **/UpgradeLog*.htm
 
+# Local audio credentials, tooling and generated audition candidates
+.local/
+/audio/generated/
+**/__pycache__/
+
 # Build and crash artifacts outside standard generated directories
 *.log
 *.pdb

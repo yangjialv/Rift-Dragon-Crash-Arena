@@ -1,5 +1,6 @@
 #include "Player/PlayerHealthComponent.h"
 
+#include "Audio/RDCAAudio.h"
 #include "Camera/CameraShakeBase.h"
 #include "Components/MeshComponent.h"
 #include "GameFramework/Pawn.h"
@@ -48,6 +49,11 @@ bool UPlayerHealthComponent::ReceiveDamage(const int32 DamageAmount)
 	}
 
 	CurrentHealth = FMath::Max(CurrentHealth - DamageAmount, 0);
+	RDCAAudio::PlayAtLocation(
+		this,
+		ERDCAAudioCue::PlayerDamaged,
+		GetOwner()->GetActorLocation(),
+		0.55f);
 	InvulnerabilityRemaining = InvulnerabilityDuration;
 	OnHealthChanged.Broadcast(CurrentHealth, MaximumHealth);
 	OnDamaged.Broadcast(DamageAmount);

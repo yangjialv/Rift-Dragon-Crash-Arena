@@ -5,6 +5,7 @@
 #include "BossSweepLaser.generated.h"
 
 class UBoxComponent;
+class UAudioComponent;
 class UMaterialInterface;
 class UNiagaraComponent;
 class USceneComponent;
@@ -19,6 +20,7 @@ public:
 	ABossSweepLaser();
 
 	virtual void Tick(float DeltaTime) override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	void InitializeLaser(
 		float NewStartYaw,
@@ -134,6 +136,7 @@ private:
 	void UpdateComponentDimensions();
 	void UpdateGroundWarningVisual();
 	bool ResolveTaggedGroundHeight(float& OutGroundZ) const;
+	void FinishLaserAudio(bool bPlayEndCue);
 
 	TSet<TWeakObjectPtr<AActor>> DamagedActors;
 	float StartYaw = 0.0f;
@@ -142,4 +145,6 @@ private:
 	float SweepElapsed = 0.0f;
 	int32 Damage = 1;
 	bool bLaserActive = false;
+	bool bLaserEndAudioPlayed = false;
+	TObjectPtr<UAudioComponent> LaserLoopAudio;
 };

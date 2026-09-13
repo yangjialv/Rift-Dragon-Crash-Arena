@@ -1,5 +1,6 @@
 #include "Player/PhaseCrashComponent.h"
 
+#include "Audio/RDCAAudio.h"
 #include "Arena/ArenaCombatBounds.h"
 #include "Arena/ArenaFloorCollision.h"
 #include "Arena/AttachSurfaceComponent.h"
@@ -267,6 +268,11 @@ void UPhaseCrashComponent::ReleaseCrash()
 	ActiveCooldownDuration = CooldownDuration;
 	bCurrentCrashRefreshesOnLanding = true;
 	SetCrashState(EPhaseCrashState::Crashing);
+	RDCAAudio::PlayAtLocation(
+		this,
+		ERDCAAudioCue::PlayerJumpRelease,
+		OwnerPawn->GetActorLocation(),
+		0.6f);
 	if (DepartureAnchor.IsValid())
 	{
 		if (UAnchorOverloadComponent* Overload =
@@ -371,6 +377,11 @@ void UPhaseCrashComponent::StartGroundDash()
 	VerticalVelocity = 0.0f;
 
 	SetCrashState(EPhaseCrashState::Crashing);
+	RDCAAudio::PlayAtLocation(
+		this,
+		ERDCAAudioCue::PlayerDash,
+		OwnerPawn->GetActorLocation(),
+		0.58f);
 	if (DepartureAnchor.IsValid())
 	{
 		if (UAnchorOverloadComponent* Overload =
@@ -1223,6 +1234,16 @@ void UPhaseCrashComponent::HandleReboundImpact(
 {
 	bActiveBossCrash = false;
 	ReboundPresentationRemaining = ReboundPresentationDuration;
+	if (TargetActor
+		&& TargetActor->FindComponentByClass<UBossEncounterComponent>()
+		&& !Cast<UBossWeakPointComponent>(Hit.GetComponent()))
+	{
+		RDCAAudio::PlayAtLocation(
+			this,
+			ERDCAAudioCue::BossBodyRebound,
+			Hit.ImpactPoint,
+			0.58f);
+	}
 	FVector ReboundDirection = FMath::GetReflectionVector(
 		IncomingDirection,
 		Hit.ImpactNormal.GetSafeNormal());

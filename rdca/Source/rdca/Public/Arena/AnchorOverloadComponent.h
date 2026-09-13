@@ -6,6 +6,7 @@
 
 class APawn;
 class AArenaPhaseController;
+class UAudioComponent;
 class UAttachSurfaceComponent;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
@@ -43,6 +44,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
 	void NotifyPlayerAttached(APawn* PlayerPawn);
@@ -108,6 +110,7 @@ private:
 	TWeakObjectPtr<AArenaPhaseController> PhaseController;
 	TWeakObjectPtr<AActor> SpawnedFractureActor;
 	TObjectPtr<UMaterialInstanceDynamic> OverloadMaterialInstance;
+	TObjectPtr<UAudioComponent> OverloadLoopAudio;
 	EAnchorOverloadState OverloadState = EAnchorOverloadState::Normal;
 	float CurrentOverloadAlpha = 0.0f;
 	float StateElapsed = 0.0f;

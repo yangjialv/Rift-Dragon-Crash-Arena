@@ -1,5 +1,6 @@
 #include "Game/RDCAPlayerController.h"
 
+#include "Audio/RDCAAudio.h"
 #include "Blueprint/UserWidget.h"
 #include "Boss/BossEncounterComponent.h"
 #include "Boss/BossWeakPointComponent.h"
@@ -100,6 +101,12 @@ void ARDCAPlayerController::FinishCombat(const ECombatResult NewResult)
 		return;
 	}
 	CombatResult = NewResult;
+	RDCAAudio::Play2D(
+		this,
+		NewResult == ECombatResult::Victory
+			? ERDCAAudioCue::Victory
+			: ERDCAAudioCue::Defeat,
+		0.72f);
 
 	if (BossEncounter.IsValid())
 	{
