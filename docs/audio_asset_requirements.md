@@ -134,7 +134,7 @@ and elastic with no charge-up, 0.7 seconds.
 
 #### `SFX_Player_JumpRelease`
 
-- 时机：拖拽瞄准后释放左键，史莱姆弹射；
+- 时机：按住左键蓄力并释放后，史莱姆弹射；
 - 类型：单次，建议 Mono；
 - 长度：0.7～1.1 秒；
 - 要求：被压缩的水滴恢复形状并弹出的声音，比 Dash 更圆、更有弹性。

@@ -126,6 +126,9 @@ void UPhaseCrashComponent::TickComponent(
 	switch (CrashState)
 	{
 	case EPhaseCrashState::Charging:
+		ChargeElapsed = FMath::Min(
+			ChargeElapsed + DeltaTime,
+			FMath::Max(MaximumChargeDuration, 0.01f));
 		if (bChargingFromAttachment)
 		{
 			MoveAttached(FVector2D::ZeroVector);
@@ -216,7 +219,7 @@ void UPhaseCrashComponent::BeginCrashAim()
 	{
 		Movement->StopMovementImmediately();
 	}
-	DragStartAimTarget = AimTarget;
+	ChargeElapsed = 0.0f;
 	SetCrashState(EPhaseCrashState::Charging);
 }
 
@@ -546,20 +549,10 @@ void UPhaseCrashComponent::ForceDetachFromAttachment()
 
 float UPhaseCrashComponent::GetChargeAlpha() const
 {
-	FVector DragOffset = AimTarget - DragStartAimTarget;
-	DragOffset.Z = 0.0f;
-	const float EffectiveDragDistance = FMath::Max(
-		DragOffset.Size() - FMath::Max(MinimumDragDistance, 0.0f),
-		0.0f);
-	const float EffectiveMaximumDistance = FMath::Max(
-		MaxDragDistance - FMath::Max(MinimumDragDistance, 0.0f),
-		0.0f);
-	return EffectiveMaximumDistance > 0.0f
-		? FMath::Clamp(
-			EffectiveDragDistance / EffectiveMaximumDistance,
-			0.0f,
-			1.0f)
-		: 1.0f;
+	return FMath::Clamp(
+		ChargeElapsed / FMath::Max(MaximumChargeDuration, 0.01f),
+		0.0f,
+		1.0f);
 }
 
 FVector UPhaseCrashComponent::GetAttachedSurfaceNormal() const
@@ -755,7 +748,8 @@ bool UPhaseCrashComponent::CalculateTrajectory(
 	OutEnd.Z = FMath::Lerp(OutStart.Z, AimTarget.Z, TargetHeightAlpha);
 	OutArcHeight = FMath::Lerp(MinArcHeight, MaxArcHeight, ChargeAlpha);
 	OutDuration = FMath::Max(
-		FVector::Distance(OutStart, OutEnd) / FMath::Max(CrashSpeed, 1.0f),
+		FVector::Distance(OutStart, OutEnd) / FMath::Max(CrashSpeed, 1.0f)
+			+ MaximumChargeExtraAirTime * ChargeAlpha,
 		MinimumFlightDuration);
 	return true;
 }

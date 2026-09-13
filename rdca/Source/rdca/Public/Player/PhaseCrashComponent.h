@@ -170,19 +170,10 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Drag Aim",
-		meta = (ClampMin = "1.0",
-			ToolTip = "World-space cursor drag distance that produces maximum launch power."))
-	float MaxDragDistance = 800.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Drag Aim",
-		meta = (ClampMin = "0.0",
-			ToolTip = "Drag dead zone before movement starts increasing arc height. Releasing inside it still performs a minimum-power jump."))
-	float MinimumDragDistance = 35.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Movement",
-		meta = (ClampMin = "0.0"))
-	float MinCrashDistance = 300.0f;
+	/** Time required to reach maximum jump height. Holding longer stays capped. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Charge",
+		meta = (ClampMin = "0.01", DisplayName = "Maximum Charge Duration"))
+	float MaximumChargeDuration = 0.8f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Movement",
 		meta = (ClampMin = "0.0"))
@@ -224,6 +215,11 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Trajectory",
 		meta = (ClampMin = "0.01"))
 	float MinimumFlightDuration = 0.12f;
+
+	/** Extra air time added at full charge so a high arc does not move unnaturally fast. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Trajectory",
+		meta = (ClampMin = "0.0", DisplayName = "Maximum Charge Extra Air Time"))
+	float MaximumChargeExtraAirTime = 0.35f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Timing",
 		meta = (ClampMin = "0.0"))
@@ -342,10 +338,10 @@ private:
 	EAttachBoxFace AttachCornerEndFace = EAttachBoxFace::PositiveX;
 	FVector AttachCornerContactLocal = FVector::ZeroVector;
 	FVector AimTarget = FVector::ZeroVector;
-	FVector DragStartAimTarget = FVector::ZeroVector;
 	FVector CrashStart = FVector::ZeroVector;
 	FVector CrashEnd = FVector::ZeroVector;
 	float ActiveArcHeight = 0.0f;
+	float ChargeElapsed = 0.0f;
 	float CrashElapsed = 0.0f;
 	float CrashDuration = 0.0f;
 	float ActiveCooldownDuration = 0.0f;
