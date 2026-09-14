@@ -4,13 +4,17 @@
 #include "Arena/ArenaFloorCollision.h"
 #include "Arena/ArenaPhaseController.h"
 #include "Blueprint/UserWidget.h"
+#include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Boss/BossEncounterComponent.h"
 #include "Boss/BossWeakPointComponent.h"
 #include "EngineUtils.h"
 #include "Components/AudioComponent.h"
+#include "Components/InputComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "GameFramework/FloatingPawnMovement.h"
+#include "InputCoreTypes.h"
 #include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetSystemLibrary.h"
 #include "Player/PhaseCrashComponent.h"
 #include "Player/PlayerHealthComponent.h"
 #include "rdca.h"
@@ -18,11 +22,11 @@
 ARDCAPlayerController::ARDCAPlayerController()
 {
 	PrimaryActorTick.bCanEverTick = true;
-	// Keep absolute mouse positioning for aiming, but let the HUD render the
-	// game-specific reticle instead of an operating-system arrow.
+	// Use the platform hardware cursor for the lowest possible aiming latency.
+	// The HUD still owns the trajectory and landing-point visualization.
 	bShowMouseCursor = true;
-	DefaultMouseCursor = EMouseCursor::None;
-	CurrentMouseCursor = EMouseCursor::None;
+	DefaultMouseCursor = EMouseCursor::Default;
+	CurrentMouseCursor = EMouseCursor::Default;
 }
 
 void ARDCAPlayerController::Tick(const float DeltaTime)
@@ -63,6 +67,7 @@ void ARDCAPlayerController::BeginPlay()
 	{
 		return;
 	}
+	ConfigureHardwareAimCursors();
 
 	const TSubclassOf<UUserWidget> CombatHUDClass = LoadClass<UUserWidget>(
 		nullptr,
@@ -79,6 +84,107 @@ void ARDCAPlayerController::BeginPlay()
 
 	ResolveCombatActors();
 	StartBossMusic();
+}
+
+void ARDCAPlayerController::SetupInputComponent()
+{
+	Super::SetupInputComponent();
+	if (!InputComponent)
+	{
+		return;
+	}
+
+	FInputKeyBinding& PauseBinding = InputComponent->BindKey(
+		EKeys::P,
+		IE_Pressed,
+		this,
+		&ARDCAPlayerController::ToggleGamePause);
+	PauseBinding.bExecuteWhenPaused = true;
+
+	FInputKeyBinding& ExitBinding = InputComponent->BindKey(
+		EKeys::Escape,
+		IE_Pressed,
+		this,
+		&ARDCAPlayerController::ExitGame);
+	ExitBinding.bExecuteWhenPaused = true;
+}
+
+void ARDCAPlayerController::ToggleGamePause()
+{
+	const bool bPauseRequested = !IsPaused();
+	SetPause(bPauseRequested);
+	UE_LOG(
+		LogRDCAPlayer,
+		Log,
+		TEXT("Game pause toggled. Paused=%s"),
+		bPauseRequested ? TEXT("true") : TEXT("false"));
+}
+
+void ARDCAPlayerController::ExitGame()
+{
+	UKismetSystemLibrary::QuitGame(
+		this,
+		this,
+		EQuitPreference::Quit,
+		false);
+}
+
+void ARDCAPlayerController::ConfigureHardwareAimCursors()
+{
+	const FVector2D CenterHotSpot(0.5f, 0.5f);
+	const bool bNormalLoaded = UWidgetBlueprintLibrary::SetHardwareCursor(
+		this,
+		EMouseCursor::Default,
+		TEXT("Slate/Cursors/RDCA_Aim_Default"),
+		CenterHotSpot);
+	const bool bChargingLoaded = UWidgetBlueprintLibrary::SetHardwareCursor(
+		this,
+		EMouseCursor::Crosshairs,
+		TEXT("Slate/Cursors/RDCA_Aim_Charging"),
+		CenterHotSpot);
+	const bool bBossLoaded = UWidgetBlueprintLibrary::SetHardwareCursor(
+		this,
+		EMouseCursor::CardinalCross,
+		TEXT("Slate/Cursors/RDCA_Aim_Boss"),
+		CenterHotSpot);
+
+	DefaultMouseCursor = EMouseCursor::Default;
+	CurrentMouseCursor = EMouseCursor::Default;
+	AimCursorState = ERDCAAimCursorState::Normal;
+	if (!bNormalLoaded || !bChargingLoaded || !bBossLoaded)
+	{
+		UE_LOG(
+			LogRDCAPlayer,
+			Warning,
+			TEXT("One or more RDCA hardware aim cursors failed to load. Normal=%s Charging=%s Boss=%s"),
+			bNormalLoaded ? TEXT("true") : TEXT("false"),
+			bChargingLoaded ? TEXT("true") : TEXT("false"),
+			bBossLoaded ? TEXT("true") : TEXT("false"));
+	}
+}
+
+void ARDCAPlayerController::SetAimCursorState(
+	const ERDCAAimCursorState NewState)
+{
+	if (AimCursorState == NewState)
+	{
+		return;
+	}
+
+	AimCursorState = NewState;
+	switch (AimCursorState)
+	{
+	case ERDCAAimCursorState::Charging:
+		CurrentMouseCursor = EMouseCursor::Crosshairs;
+		break;
+	case ERDCAAimCursorState::BossTarget:
+		CurrentMouseCursor = EMouseCursor::CardinalCross;
+		break;
+	case ERDCAAimCursorState::Normal:
+	default:
+		CurrentMouseCursor = EMouseCursor::Default;
+		break;
+	}
 }
 
 void ARDCAPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -126,27 +232,54 @@ void ARDCAPlayerController::ResolveCombatActors()
 
 void ARDCAPlayerController::StartBossMusic()
 {
-	if (!IsLocalController() || IsValid(BossMusicAudio))
+	if (!IsLocalController())
 	{
 		return;
 	}
-	CurrentBossMusicVolume = 0.0f;
+	if (IsValid(BossMusicAudio))
+	{
+		if (BossMusicAudio->IsPlaying())
+		{
+			return;
+		}
+		BossMusicAudio->Stop();
+		BossMusicAudio->DestroyComponent();
+		BossMusicAudio = nullptr;
+	}
+
+	// Starting a newly loaded long SoundWave at exactly zero can cause the audio
+	// device to discard the silent voice before the first volume interpolation.
+	// Start just above silence, then let UpdateBossMusic perform the normal fade.
+	CurrentBossMusicVolume = FMath::Max(BossMusicStartVolume, 0.001f);
 	BossMusicAudio = RDCAAudio::Spawn2D(
 		this,
 		ERDCAAudioCue::BossMusicMain,
-		0.0f,
+		CurrentBossMusicVolume,
 		1.0f,
-		false);
+		true);
+	BossMusicRetryRemaining = FMath::Max(BossMusicRetryInterval, 0.1f);
 	if (BossMusicAudio)
 	{
 		BossMusicAudio->bAutoDestroy = false;
+		UE_LOG(LogRDCAPlayer, Log, TEXT("Boss BGM playback requested."));
+	}
+	else
+	{
+		UE_LOG(LogRDCAPlayer, Warning, TEXT("Boss BGM playback request failed; retry scheduled."));
 	}
 }
 
 void ARDCAPlayerController::UpdateBossMusic(const float DeltaTime)
 {
-	if (!IsValid(BossMusicAudio))
+	if (!IsValid(BossMusicAudio) || !BossMusicAudio->IsPlaying())
 	{
+		BossMusicRetryRemaining = FMath::Max(
+			BossMusicRetryRemaining - DeltaTime,
+			0.0f);
+		if (BossMusicRetryRemaining <= 0.0f)
+		{
+			StartBossMusic();
+		}
 		return;
 	}
 	CurrentBossMusicVolume = FMath::FInterpTo(

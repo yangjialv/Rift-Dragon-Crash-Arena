@@ -12,6 +12,14 @@ enum class ECombatResult : uint8
 	Defeat
 };
 
+UENUM(BlueprintType)
+enum class ERDCAAimCursorState : uint8
+{
+	Normal,
+	Charging,
+	BossTarget
+};
+
 UCLASS()
 class RDCA_API ARDCAPlayerController : public APlayerController
 {
@@ -29,10 +37,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	void RestartCurrentBattle();
 
+	void SetAimCursorState(ERDCAAimCursorState NewState);
+
 protected:
 	virtual void BeginPlay() override;
+	virtual void SetupInputComponent() override;
 
 private:
+	void ToggleGamePause();
+	void ExitGame();
+	void ConfigureHardwareAimCursors();
 	void ResolveCombatActors();
 	void BeginVictoryLanding();
 	void TickVictoryLanding(float DeltaTime);
@@ -54,6 +68,16 @@ private:
 	TObjectPtr<class UAudioComponent> BossMusicAudio;
 
 	float CurrentBossMusicVolume = 0.0f;
+	float BossMusicRetryRemaining = 0.0f;
+	ERDCAAimCursorState AimCursorState = ERDCAAimCursorState::Normal;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Audio",
+		meta = (ClampMin = "0.001", ClampMax = "0.1"))
+	float BossMusicStartVolume = 0.01f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Audio",
+		meta = (ClampMin = "0.1"))
+	float BossMusicRetryInterval = 0.75f;
 	bool bVictoryLandingInProgress = false;
 	float VictoryLandingElapsed = 0.0f;
 	FVector VictoryLandingDestination = FVector::ZeroVector;

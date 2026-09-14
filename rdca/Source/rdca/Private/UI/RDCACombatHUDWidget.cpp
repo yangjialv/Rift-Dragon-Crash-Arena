@@ -137,7 +137,7 @@ int32 URDCACombatHUDWidget::NativePaint(
 		InWidgetStyle,
 		bParentEnabled);
 	APlayerController* OwningPlayer = GetOwningPlayer();
-	if (!bDrawGameAimCursor || !OwningPlayer)
+	if (!OwningPlayer)
 	{
 		return BaseLayer;
 	}
@@ -277,6 +277,15 @@ int32 URDCACombatHUDWidget::NativePaint(
 	// During committed travel the aim UI disappears. Once the battle result is
 	// visible the neutral cursor returns so the Restart button remains usable.
 	if (bBattlePlaying && CrashState == EPhaseCrashState::Crashing)
+	{
+		return DrawLayer;
+	}
+	// A platform hardware crosshair follows the physical mouse independently of
+	// the game render frame. Do not paint a second, one-frame-late software cursor
+	// on top of it. Projects that explicitly select None can still use this HUD
+	// reticle as a fallback.
+	if (!bDrawGameAimCursor
+		|| OwningPlayer->DefaultMouseCursor != EMouseCursor::None)
 	{
 		return DrawLayer;
 	}

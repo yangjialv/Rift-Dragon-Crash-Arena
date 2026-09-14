@@ -12,6 +12,7 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PawnMovementComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "Game/RDCAPlayerController.h"
 #include "EngineUtils.h"
 #include "rdca.h"
 
@@ -55,12 +56,15 @@ bool IsBossCrashAimTarget(const FHitResult& Hit)
 		|| Cast<UBossWeakPointComponent>(Hit.GetComponent()) != nullptr;
 }
 
-void SetBossAimCursor(APlayerController& PlayerController, const bool bBossAim)
+void SetAimCursor(
+	APlayerController& PlayerController,
+	const ERDCAAimCursorState State)
 {
-	(void)bBossAim;
-	// The combat HUD owns the software reticle and reads IsBossAimActive() to
-	// change its colour. Never reveal a platform cursor on top of it.
-	PlayerController.CurrentMouseCursor = EMouseCursor::None;
+	if (ARDCAPlayerController* RDCAController =
+			Cast<ARDCAPlayerController>(&PlayerController))
+	{
+		RDCAController->SetAimCursorState(State);
+	}
 }
 
 float GetArenaAimPlaneZ(const UWorld& World, const APawn& OwnerPawn)
@@ -134,6 +138,15 @@ void UPhaseCrashComponent::TickComponent(
 			MoveAttached(FVector2D::ZeroVector);
 		}
 		UpdateAimTarget();
+		if (APlayerController* PlayerController =
+				Cast<APlayerController>(OwnerPawn ? OwnerPawn->GetController() : nullptr))
+		{
+			SetAimCursor(
+				*PlayerController,
+				bAimingAtBoss
+					? ERDCAAimCursorState::BossTarget
+					: ERDCAAimCursorState::Charging);
+		}
 		break;
 
 	case EPhaseCrashState::Crashing:
@@ -254,7 +267,7 @@ void UPhaseCrashComponent::ReleaseCrash()
 	if (APlayerController* PlayerController =
 			Cast<APlayerController>(OwnerPawn->GetController()))
 	{
-		SetBossAimCursor(*PlayerController, false);
+		SetAimCursor(*PlayerController, ERDCAAimCursorState::Normal);
 	}
 	ClearTemporaryMoveIgnores();
 	CrashElapsed = 0.0f;
@@ -294,7 +307,7 @@ void UPhaseCrashComponent::CancelCharging()
 	if (APlayerController* PlayerController =
 			Cast<APlayerController>(OwnerPawn ? OwnerPawn->GetController() : nullptr))
 	{
-		SetBossAimCursor(*PlayerController, false);
+		SetAimCursor(*PlayerController, ERDCAAimCursorState::Normal);
 	}
 	if (CrashState == EPhaseCrashState::Charging)
 	{
@@ -337,7 +350,7 @@ void UPhaseCrashComponent::StartGroundDash()
 	if (APlayerController* PlayerController =
 			Cast<APlayerController>(OwnerPawn->GetController()))
 	{
-		SetBossAimCursor(*PlayerController, false);
+		SetAimCursor(*PlayerController, ERDCAAimCursorState::Normal);
 	}
 	if (UPawnMovementComponent* Movement = OwnerPawn->GetMovementComponent())
 	{
@@ -645,7 +658,6 @@ bool UPhaseCrashComponent::UpdateAimTarget()
 	}
 
 	bAimingAtBoss = false;
-	SetBossAimCursor(*PlayerController, false);
 
 	FVector RayOrigin;
 	FVector RayDirection;
@@ -675,7 +687,6 @@ bool UPhaseCrashComponent::UpdateAimTarget()
 				AimTarget = CandidateHit.ImpactPoint;
 				bAimingAtBoss = bChargingFromAttachment
 					&& IsBossCrashAimTarget(CandidateHit);
-				SetBossAimCursor(*PlayerController, bAimingAtBoss);
 				return true;
 			}
 		}
@@ -1634,4 +1645,15 @@ void UPhaseCrashComponent::SetCrashState(const EPhaseCrashState NewState)
 		LexToString(PreviousState),
 		LexToString(NewState));
 	OnCrashStateChanged.Broadcast(PreviousState, NewState);
+	if (APlayerController* PlayerController = Cast<APlayerController>(
+		OwnerPawn ? OwnerPawn->GetController() : nullptr))
+	{
+		SetAimCursor(
+			*PlayerController,
+			NewState == EPhaseCrashState::Charging
+				? (bAimingAtBoss
+					? ERDCAAimCursorState::BossTarget
+					: ERDCAAimCursorState::Charging)
+				: ERDCAAimCursorState::Normal);
+	}
 }
