@@ -11,6 +11,7 @@
 #include "EngineUtils.h"
 #include "Materials/MaterialInterface.h"
 #include "NiagaraComponent.h"
+#include "NiagaraSystem.h"
 #include "Player/PlayerHealthComponent.h"
 #include "rdca.h"
 #include "UObject/ConstructorHelpers.h"
@@ -203,7 +204,8 @@ void ABossSweepLaser::InitializeLaser(
 	const float NewStartYaw,
 	const float NewEndYaw,
 	const float NewSweepDuration,
-	const int32 NewDamage)
+	const int32 NewDamage,
+	const bool bUsePhase2Effect)
 {
 	StartYaw = NewStartYaw;
 	EndYaw = NewEndYaw;
@@ -216,6 +218,7 @@ void ABossSweepLaser::InitializeLaser(
 	GroundWarningVisual->SetHiddenInGame(false, true);
 	SetActorRotation(FRotator(0.0f, StartYaw, 0.0f));
 	UpdateComponentDimensions();
+	ApplyPhaseNiagaraSystem(bUsePhase2Effect);
 	LaserEffect->DeactivateImmediate();
 
 	if (UMaterialInterface* Warning = GroundWarningMaterial
@@ -230,6 +233,32 @@ void ABossSweepLaser::InitializeLaser(
 		ERDCAAudioCue::LaserWarning,
 		GetActorLocation(),
 		0.52f);
+}
+
+void ABossSweepLaser::ApplyPhaseNiagaraSystem(
+	const bool bUsePhase2Effect)
+{
+	if (!LaserEffect)
+	{
+		return;
+	}
+
+	UNiagaraSystem* DesiredSystem = bUsePhase2Effect
+		? Phase2LaserNiagara.Get()
+		: Phase1LaserNiagara.Get();
+
+	// A missing Phase 2 override falls back to the explicit Phase 1 system.
+	// If both are empty, preserve the legacy asset authored directly on the
+	// LaserEffect component so existing Blueprints keep working unchanged.
+	if (!DesiredSystem && bUsePhase2Effect)
+	{
+		DesiredSystem = Phase1LaserNiagara.Get();
+	}
+
+	if (DesiredSystem && LaserEffect->GetAsset() != DesiredSystem)
+	{
+		LaserEffect->SetAsset(DesiredSystem);
+	}
 }
 
 void ABossSweepLaser::ActivateLaser()

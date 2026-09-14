@@ -8,6 +8,7 @@ class UBoxComponent;
 class UAudioComponent;
 class UMaterialInterface;
 class UNiagaraComponent;
+class UNiagaraSystem;
 class USceneComponent;
 class UStaticMeshComponent;
 
@@ -26,7 +27,8 @@ public:
 		float NewStartYaw,
 		float NewEndYaw,
 		float NewSweepDuration,
-		int32 NewDamage);
+		int32 NewDamage,
+		bool bUsePhase2Effect);
 
 	void ActivateLaser();
 	void UpdateWarningPose(const FVector& WorldLocation, float WorldYaw);
@@ -97,6 +99,22 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Laser|Visual")
 	bool bShowLaserVisualDuringActive = false;
 
+	/**
+	 * Optional explicit Phase 1 Niagara system. When left empty, the system
+	 * already assigned to LaserEffect in the Blueprint remains in use.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Laser|Visual|Phase",
+		meta = (DisplayName = "Phase 1 Laser Niagara"))
+	TObjectPtr<UNiagaraSystem> Phase1LaserNiagara;
+
+	/**
+	 * Niagara system used for the Phase 2 laser. It shares the same component,
+	 * transform, dimensions and damage volume as the Phase 1 effect.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Laser|Visual|Phase",
+		meta = (DisplayName = "Phase 2 Laser Niagara"))
+	TObjectPtr<UNiagaraSystem> Phase2LaserNiagara;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Laser|Warning")
 	TObjectPtr<UMaterialInterface> GroundWarningMaterial;
 
@@ -135,6 +153,7 @@ private:
 	void ApplyAnchorOverload(float DeltaTime);
 	void UpdateComponentDimensions();
 	void UpdateGroundWarningVisual();
+	void ApplyPhaseNiagaraSystem(bool bUsePhase2Effect);
 	bool ResolveTaggedGroundHeight(float& OutGroundZ) const;
 	void FinishLaserAudio(bool bPlayEndCue);
 

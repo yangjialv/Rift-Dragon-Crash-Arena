@@ -1202,7 +1202,8 @@ void UBossEncounterComponent::SpawnLaserWarning()
 			CenterYaw,
 			CenterYaw,
 			LaserActiveSweepDuration,
-			LaserDamage);
+			LaserDamage,
+			GetCombatPhase() == EBossCombatPhase::Phase2);
 		ActiveSweepLaser = Laser;
 	}
 }
