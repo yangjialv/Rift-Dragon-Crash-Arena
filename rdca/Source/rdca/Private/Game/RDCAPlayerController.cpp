@@ -93,7 +93,7 @@ void ARDCAPlayerController::BeginPlay()
 void ARDCAPlayerController::ApplyPlaytestPerformanceProfile()
 {
 #if !WITH_EDITOR
-	constexpr int32 CurrentProfileVersion = 1;
+	constexpr int32 CurrentProfileVersion = 2;
 	constexpr TCHAR ProfileSection[] = TEXT("RDCA.PlaytestPerformance");
 	constexpr TCHAR ProfileVersionKey[] = TEXT("AppliedProfileVersion");
 
@@ -119,32 +119,23 @@ void ARDCAPlayerController::ApplyPlaytestPerformanceProfile()
 		return;
 	}
 
-	// Start from Medium, then preserve full-density combat Niagara while
-	// reducing the expensive lighting, reflection and foliage passes.
-	Settings->SetOverallScalabilityLevel(1);
-	const FIntPoint OutputResolution = Settings->GetScreenResolution();
-	float ResolutionScale = 75.0f;
-	if (OutputResolution.X > 0 && OutputResolution.Y > 0)
-	{
-		// Keep the internal render target at or below roughly 1600x900, even
-		// when a tester launches the borderless game on a 1440p/4K desktop.
-		const float WidthScale = 160000.0f / OutputResolution.X;
-		const float HeightScale = 90000.0f / OutputResolution.Y;
-		ResolutionScale = FMath::Min(
-			ResolutionScale,
-			FMath::Min(WidthScale, HeightScale));
-	}
-	Settings->SetResolutionScaleValueEx(ResolutionScale);
-	Settings->SetViewDistanceQuality(1);
-	Settings->SetAntiAliasingQuality(2);
-	Settings->SetShadowQuality(1);
+	// This package targets low-spec playtest machines. Keep the actual gameplay
+	// unchanged while selecting the cheapest renderer settings that preserve
+	// readable warnings, projectiles and the Boss silhouette.
+	Settings->SetOverallScalabilityLevel(0);
+	Settings->SetScreenResolution(FIntPoint(1280, 720));
+	Settings->SetFullscreenMode(EWindowMode::Fullscreen);
+	Settings->SetResolutionScaleValueEx(100.0f);
+	Settings->SetViewDistanceQuality(0);
+	Settings->SetAntiAliasingQuality(1);
+	Settings->SetShadowQuality(0);
 	Settings->SetGlobalIlluminationQuality(0);
 	Settings->SetReflectionQuality(0);
-	Settings->SetPostProcessingQuality(1);
-	Settings->SetTextureQuality(2);
-	Settings->SetVisualEffectQuality(1);
+	Settings->SetPostProcessingQuality(0);
+	Settings->SetTextureQuality(1);
+	Settings->SetVisualEffectQuality(0);
 	Settings->SetFoliageQuality(0);
-	Settings->SetShadingQuality(1);
+	Settings->SetShadingQuality(0);
 	Settings->SetVSyncEnabled(false);
 	Settings->SetFrameRateLimit(60.0f);
 	Settings->ApplySettings(false);
