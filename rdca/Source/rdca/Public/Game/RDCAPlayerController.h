@@ -46,6 +46,7 @@ protected:
 private:
 	void ToggleGamePause();
 	void ExitGame();
+	void ApplyPlaytestPerformanceProfile();
 	void ConfigureHardwareAimCursors();
 	void ResolveCombatActors();
 	void BeginVictoryLanding();

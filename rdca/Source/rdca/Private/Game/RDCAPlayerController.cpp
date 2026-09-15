@@ -7,14 +7,17 @@
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Boss/BossEncounterComponent.h"
 #include "Boss/BossWeakPointComponent.h"
+#include "Engine/Engine.h"
 #include "EngineUtils.h"
 #include "Components/AudioComponent.h"
 #include "Components/InputComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "GameFramework/FloatingPawnMovement.h"
+#include "GameFramework/GameUserSettings.h"
 #include "InputCoreTypes.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "Misc/ConfigCacheIni.h"
 #include "Player/PhaseCrashComponent.h"
 #include "Player/PlayerHealthComponent.h"
 #include "rdca.h"
@@ -67,6 +70,7 @@ void ARDCAPlayerController::BeginPlay()
 	{
 		return;
 	}
+	ApplyPlaytestPerformanceProfile();
 	ConfigureHardwareAimCursors();
 
 	const TSubclassOf<UUserWidget> CombatHUDClass = LoadClass<UUserWidget>(
@@ -84,6 +88,83 @@ void ARDCAPlayerController::BeginPlay()
 
 	ResolveCombatActors();
 	StartBossMusic();
+}
+
+void ARDCAPlayerController::ApplyPlaytestPerformanceProfile()
+{
+#if !WITH_EDITOR
+	constexpr int32 CurrentProfileVersion = 1;
+	constexpr TCHAR ProfileSection[] = TEXT("RDCA.PlaytestPerformance");
+	constexpr TCHAR ProfileVersionKey[] = TEXT("AppliedProfileVersion");
+
+	int32 AppliedProfileVersion = 0;
+	if (GConfig)
+	{
+		GConfig->GetInt(
+			ProfileSection,
+			ProfileVersionKey,
+			AppliedProfileVersion,
+			GGameUserSettingsIni);
+	}
+	if (AppliedProfileVersion >= CurrentProfileVersion)
+	{
+		return;
+	}
+
+	UGameUserSettings* Settings = GEngine
+		? GEngine->GetGameUserSettings()
+		: nullptr;
+	if (!Settings)
+	{
+		return;
+	}
+
+	// Start from Medium, then preserve full-density combat Niagara while
+	// reducing the expensive lighting, reflection and foliage passes.
+	Settings->SetOverallScalabilityLevel(1);
+	const FIntPoint OutputResolution = Settings->GetScreenResolution();
+	float ResolutionScale = 75.0f;
+	if (OutputResolution.X > 0 && OutputResolution.Y > 0)
+	{
+		// Keep the internal render target at or below roughly 1600x900, even
+		// when a tester launches the borderless game on a 1440p/4K desktop.
+		const float WidthScale = 160000.0f / OutputResolution.X;
+		const float HeightScale = 90000.0f / OutputResolution.Y;
+		ResolutionScale = FMath::Min(
+			ResolutionScale,
+			FMath::Min(WidthScale, HeightScale));
+	}
+	Settings->SetResolutionScaleValueEx(ResolutionScale);
+	Settings->SetViewDistanceQuality(1);
+	Settings->SetAntiAliasingQuality(2);
+	Settings->SetShadowQuality(1);
+	Settings->SetGlobalIlluminationQuality(0);
+	Settings->SetReflectionQuality(0);
+	Settings->SetPostProcessingQuality(1);
+	Settings->SetTextureQuality(2);
+	Settings->SetVisualEffectQuality(1);
+	Settings->SetFoliageQuality(0);
+	Settings->SetShadingQuality(1);
+	Settings->SetVSyncEnabled(false);
+	Settings->SetFrameRateLimit(60.0f);
+	Settings->ApplySettings(false);
+
+	if (GConfig)
+	{
+		GConfig->SetInt(
+			ProfileSection,
+			ProfileVersionKey,
+			CurrentProfileVersion,
+			GGameUserSettingsIni);
+		GConfig->Flush(false, GGameUserSettingsIni);
+	}
+
+	UE_LOG(
+		LogRDCAPlayer,
+		Log,
+		TEXT("Applied playtest performance profile version %d."),
+		CurrentProfileVersion);
+#endif
 }
 
 void ARDCAPlayerController::SetupInputComponent()
