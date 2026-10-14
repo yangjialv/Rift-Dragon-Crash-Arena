@@ -50,7 +50,8 @@ public:
 		float NewHomingTurnDegreesPerSecond = 0.0f,
 		float NewHomingDuration = 0.0f,
 		float NewHomingStopDistance = 0.0f,
-		float NewMaximumHomingAngle = 180.0f);
+		float NewMaximumHomingAngle = 180.0f,
+		float NewHomingActivationDelay = 0.0f);
 
 	/** Applies the colour belonging to the phase that spawned this projectile. */
 	void SetCodePhaseVisual(bool bCodePhase);
@@ -109,6 +110,7 @@ private:
 	float HomingTurnDegreesPerSecond = 0.0f;
 	float HomingDuration = 0.0f;
 	float HomingElapsed = 0.0f;
+	float HomingActivationDelay = 0.0f;
 	float HomingStopDistance = 0.0f;
 	float MaximumHomingAngle = 180.0f;
 	float InitialTravelYaw = 0.0f;

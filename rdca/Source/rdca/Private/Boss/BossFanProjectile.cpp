@@ -106,9 +106,18 @@ void ABossFanProjectile::UpdateSteering(const float DeltaTime)
 	}
 
 	HomingElapsed += DeltaTime;
+	if (HomingElapsed < HomingActivationDelay)
+	{
+		// Preserve the authored launch direction briefly so a volley opens into
+		// a readable fan before every projectile starts steering at the player.
+		return;
+	}
+
+	const float ActiveHomingElapsed =
+		HomingElapsed - HomingActivationDelay;
 	AActor* Target = HomingTarget.Get();
 	if (!Target
-		|| HomingElapsed >= HomingDuration
+		|| ActiveHomingElapsed >= HomingDuration
 		|| FVector::Dist2D(GetActorLocation(), Target->GetActorLocation())
 			<= HomingStopDistance)
 	{
@@ -187,7 +196,8 @@ void ABossFanProjectile::InitializePatternProjectile(
 	const float NewHomingTurnDegreesPerSecond,
 	const float NewHomingDuration,
 	const float NewHomingStopDistance,
-	const float NewMaximumHomingAngle)
+	const float NewMaximumHomingAngle,
+	const float NewHomingActivationDelay)
 {
 	InitializeGroundSkimmingProjectile(
 		WorldDirection,
@@ -204,6 +214,9 @@ void ABossFanProjectile::InitializePatternProjectile(
 		0.0f);
 	HomingDuration = FMath::Max(NewHomingDuration, 0.0f);
 	HomingElapsed = 0.0f;
+	HomingActivationDelay = FMath::Max(
+		NewHomingActivationDelay,
+		0.0f);
 	HomingStopDistance = FMath::Max(NewHomingStopDistance, 0.0f);
 	MaximumHomingAngle = FMath::Clamp(
 		NewMaximumHomingAngle,

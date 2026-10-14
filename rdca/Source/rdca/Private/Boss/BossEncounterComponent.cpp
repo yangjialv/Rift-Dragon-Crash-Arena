@@ -93,7 +93,8 @@ int32 UBossEncounterComponent::GetEffectivePhase2StartHitPoints() const
 
 float UBossEncounterComponent::GetPhase2InterAttackDelay() const
 {
-	return FMath::Max(Phase2InterAttackDelay, 0.0f);
+	return FMath::Max(Phase2InterAttackDelay, 0.0f)
+		* FMath::Max(Phase2InterAttackDelayMultiplier, 0.0f);
 }
 
 float UBossEncounterComponent::GetStateProgress() const
@@ -1421,7 +1422,8 @@ void UBossEncounterComponent::SpawnSharedBarrageProjectile(
 	const float CurveRate,
 	const float MaxCurve,
 	AActor* HomingTarget,
-	const float SizeMultiplier)
+	const float SizeMultiplier,
+	const float HomingActivationDelaySeconds)
 {
 	const TSubclassOf<ABossFanProjectile> ProjectileClass = FanProjectileClass;
 	if (!GetWorld() || !ProjectileClass || Direction.IsNearlyZero())
@@ -1445,12 +1447,18 @@ void UBossEncounterComponent::SpawnSharedBarrageProjectile(
 		SpawnParameters);
 	if (Projectile)
 	{
+		const float PhaseSpeedMultiplier =
+			GetCombatPhase() == EBossCombatPhase::Phase2
+				? FMath::Max(Phase2BarrageSpeedMultiplier, 0.01f)
+				: 1.0f;
 		Projectile->SetActorScale3D(
 			Projectile->GetActorScale3D()
 				* FMath::Max(SizeMultiplier, 0.1f));
 		Projectile->InitializePatternProjectile(
 			Direction,
-			Speed * FMath::Max(BarrageSpeedMultiplier, 0.1f),
+			Speed
+				* FMath::Max(BarrageSpeedMultiplier, 0.1f)
+				* PhaseSpeedMultiplier,
 			BarrageProjectileDamage,
 			CruiseHeight,
 			MotionMode,
@@ -1460,7 +1468,8 @@ void UBossEncounterComponent::SpawnSharedBarrageProjectile(
 			HomingTurnDegreesPerSecond,
 			HomingDuration,
 			HomingStopDistance,
-			MaximumHomingAngle);
+			MaximumHomingAngle,
+			HomingActivationDelaySeconds);
 		Projectile->SetCodePhaseVisual(
 			GetCombatPhase() == EBossCombatPhase::Phase2);
 		RDCAAudio::PlayNextBarrageShot(this, SpawnLocation);
@@ -1603,14 +1612,19 @@ void UBossEncounterComponent::SpawnHomingWave()
 		(PlayerPawn->GetActorLocation() - SpawnLocation).GetSafeNormal();
 	const int32 Count = FMath::Max(HomingProjectileCount, 1)
 		* FMath::Max(HomingCountMultiplier, 1);
+	const float LaunchSpreadDegrees = FMath::Clamp(
+		HomingSpreadDegrees
+			* FMath::Max(HomingLaunchSpreadMultiplier, 0.1f),
+		0.0f,
+		160.0f);
 	for (int32 Index = 0; Index < Count; ++Index)
 	{
 		const float Alpha = Count > 1
 			? static_cast<float>(Index) / static_cast<float>(Count - 1)
 			: 0.5f;
 		const float YawOffset = FMath::Lerp(
-			-HomingSpreadDegrees * 0.5f,
-			HomingSpreadDegrees * 0.5f,
+			-LaunchSpreadDegrees * 0.5f,
+			LaunchSpreadDegrees * 0.5f,
 			Alpha);
 		SpawnSharedBarrageProjectile(
 			CenterDirection.RotateAngleAxis(
@@ -1621,7 +1635,8 @@ void UBossEncounterComponent::SpawnHomingWave()
 			0.0f,
 			0.0f,
 			PlayerPawn,
-			HomingSizeMultiplier);
+			HomingSizeMultiplier,
+			HomingActivationDelay);
 	}
 }
 

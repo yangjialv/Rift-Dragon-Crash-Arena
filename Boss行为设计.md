@@ -171,6 +171,11 @@ Phase 1 不使用曲线、追踪、旋转缺口、双螺旋和密集扇形，避
 这些模式仍共用 `Barrage Projectile Class`。第一版先验证运动和判定，之后再用
 颜色、拖尾和声音区分轨迹类型。
 
+`Limited Homing Volley` 使用两段式运动：生成后先按扩大后的扇形方向直线扩散，
+经过 `Homing Activation Delay` 后才开始追踪。启动扩散角为
+`Homing Spread Degrees × Homing Launch Spread Multiplier`，避免大尺寸追踪弹刚离开
+发射点便挤成一团。延迟阶段不消耗 `Homing Duration`。
+
 ---
 
 ## 7. Phase 1 正式编排
@@ -340,6 +345,9 @@ Phase 1 Base Weak Point Exposure = 3.0 s
 
 Phase 2 Attacks Before Stun = 3
 Phase 2 Inter Attack Delay = 0.65 s
+Phase 2 Inter Attack Delay Multiplier = 0.5
+Phase 2 Effective Inter Attack Delay = 0.325 s
+Phase 2 Barrage Speed Multiplier = 0.75
 Phase 2 Shockwave Pulse Delay = 0.28 s
 Phase 2 Base Weak Point Exposure = 2.25 s
 Phase 2 Barrage Weight = 0.5
@@ -443,7 +451,10 @@ Barrage Pattern、本轮已用数量、Locked Target 和 Random Seed。
 - [ ] 第二道波按 `Phase 2 Shockwave Pulse Delay` 提前释放，与第一道波同时存在；
 - [ ] 第三次攻击结束后直接眩晕，不插入 Recovery；
 - [ ] 追踪弹数量为原配置 2 倍，显示和碰撞尺寸为原配置 4 倍；
-- [ ] 所有弹幕实际移动速度为原配置 1.5 倍；
+- [ ] 追踪弹先形成清楚扇形，再经过 `0.55` 秒开始追踪，启动阶段不会挤成一团；
+- [ ] Phase 1 弹幕实际移动速度为原配置 1.5 倍；Phase 2 在此基础上乘以
+  `0.75`，即为调整前二阶段速度的 75%；
+- [ ] Phase 2 前两次攻击后的有效 Recovery 间隔为 `0.325` 秒；
 - [ ] 错过弱点不会让战斗卡死。
 
 ### 安全与收尾

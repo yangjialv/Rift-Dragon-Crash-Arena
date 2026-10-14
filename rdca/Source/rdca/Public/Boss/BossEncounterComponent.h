@@ -325,6 +325,16 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Homing")
 	float HomingSpreadDegrees = 28.0f;
 
+	/** Enlarges saved Blueprint spread values during the non-homing launch stage. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Homing",
+		meta = (ClampMin = "0.1", DisplayName = "Homing Launch Spread Multiplier"))
+	float HomingLaunchSpreadMultiplier = 2.0f;
+
+	/** Time spent flying outward along the launch fan before homing activates. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Homing",
+		meta = (ClampMin = "0.0", DisplayName = "Homing Activation Delay"))
+	float HomingActivationDelay = 0.55f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Barrage|Homing")
 	float HomingProjectileSpeed = 1100.0f;
 
@@ -390,6 +400,16 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Phase 2",
 		meta = (ClampMin = "0.1"))
 	float Phase2InterAttackDelay = 0.65f;
+
+	/** Multiplies every Phase 2 barrage projectile speed after the common speed multiplier. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Phase 2",
+		meta = (ClampMin = "0.01", DisplayName = "Phase 2 Barrage Speed Multiplier"))
+	float Phase2BarrageSpeedMultiplier = 0.75f;
+
+	/** Multiplies the recovery gap between completed Phase 2 attacks. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Phase 2",
+		meta = (ClampMin = "0.0", DisplayName = "Phase 2 Inter Attack Delay Multiplier"))
+	float Phase2InterAttackDelayMultiplier = 0.5f;
 
 	/** First-stage category weight. The three category weights are normalized at runtime. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Phase 2|Selection",
@@ -648,7 +668,8 @@ private:
 		float CurveRate = 0.0f,
 		float MaxCurve = 0.0f,
 		AActor* HomingTarget = nullptr,
-		float SizeMultiplier = 1.0f);
+		float SizeMultiplier = 1.0f,
+		float HomingActivationDelaySeconds = 0.0f);
 	int32 GetBarrageStepCount() const;
 	float GetBarrageStepInterval() const;
 	float GetBarrageAttackDuration() const;

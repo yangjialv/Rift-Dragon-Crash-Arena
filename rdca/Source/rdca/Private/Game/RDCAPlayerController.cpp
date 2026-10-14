@@ -93,7 +93,7 @@ void ARDCAPlayerController::BeginPlay()
 void ARDCAPlayerController::ApplyPlaytestPerformanceProfile()
 {
 #if !WITH_EDITOR
-	constexpr int32 CurrentProfileVersion = 2;
+	constexpr int32 CurrentProfileVersion = 3;
 	constexpr TCHAR ProfileSection[] = TEXT("RDCA.PlaytestPerformance");
 	constexpr TCHAR ProfileVersionKey[] = TEXT("AppliedProfileVersion");
 
@@ -125,19 +125,24 @@ void ARDCAPlayerController::ApplyPlaytestPerformanceProfile()
 	Settings->SetOverallScalabilityLevel(0);
 	Settings->SetScreenResolution(FIntPoint(1280, 720));
 	Settings->SetFullscreenMode(EWindowMode::Fullscreen);
-	Settings->SetResolutionScaleValueEx(100.0f);
+	// Keep the UI at 1280x720 while rendering the 3D scene at 60% internally.
+	// This is the single largest safe GPU saving for an integrated graphics
+	// playtest machine and does not alter gameplay-space calculations.
+	Settings->SetResolutionScaleValueEx(60.0f);
 	Settings->SetViewDistanceQuality(0);
 	Settings->SetAntiAliasingQuality(1);
 	Settings->SetShadowQuality(0);
 	Settings->SetGlobalIlluminationQuality(0);
 	Settings->SetReflectionQuality(0);
 	Settings->SetPostProcessingQuality(0);
-	Settings->SetTextureQuality(1);
+	Settings->SetTextureQuality(0);
 	Settings->SetVisualEffectQuality(0);
 	Settings->SetFoliageQuality(0);
 	Settings->SetShadingQuality(0);
 	Settings->SetVSyncEnabled(false);
-	Settings->SetFrameRateLimit(60.0f);
+	// A stable 30 FPS is preferable to large frame-time swings on the target
+	// integrated-GPU laptop. Simulation still uses DeltaTime and is not slowed.
+	Settings->SetFrameRateLimit(30.0f);
 	Settings->ApplySettings(false);
 
 	if (GConfig)
