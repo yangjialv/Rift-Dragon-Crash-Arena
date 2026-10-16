@@ -7,6 +7,8 @@
 class UCameraShakeBase;
 class UMaterialInstanceDynamic;
 class USoundBase;
+class URDCAAbilitySystemComponent;
+struct FOnAttributeChangeData;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	FOnPlayerHealthChanged,
@@ -37,6 +39,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
 	UFUNCTION(BlueprintCallable, Category = "Player|Health")
@@ -46,24 +49,24 @@ public:
 	void ResetHealth();
 
 	UFUNCTION(BlueprintPure, Category = "Player|Health")
-	int32 GetCurrentHealth() const { return CurrentHealth; }
+	int32 GetCurrentHealth() const;
 
 	UFUNCTION(BlueprintPure, Category = "Player|Health")
-	int32 GetMaximumHealth() const { return MaximumHealth; }
+	int32 GetMaximumHealth() const;
 
 	UFUNCTION(BlueprintPure, Category = "Player|Health")
-	bool IsDefeated() const { return CurrentHealth <= 0; }
+	bool IsDefeated() const { return GetCurrentHealth() <= 0; }
 
 	UFUNCTION(BlueprintPure, Category = "Player|Health")
 	float GetHealthPercent() const
 	{
-		return MaximumHealth > 0
-			? static_cast<float>(CurrentHealth) / MaximumHealth
+		return GetMaximumHealth() > 0
+			? static_cast<float>(GetCurrentHealth()) / GetMaximumHealth()
 			: 0.0f;
 	}
 
 	UFUNCTION(BlueprintPure, Category = "Player|Health")
-	bool IsInvulnerable() const { return InvulnerabilityRemaining > 0.0f; }
+	bool IsInvulnerable() const;
 
 	UPROPERTY(BlueprintAssignable, Category = "Player|Health")
 	FOnPlayerHealthChanged OnHealthChanged;
@@ -105,12 +108,17 @@ protected:
 	float HitSoundVolume = 1.0f;
 
 private:
+	friend class URDCAPresentationComponent;
+	void InitializeAbilitySystem();
+	void HandleHealthChanged(const FOnAttributeChangeData& Data);
+	void HandleMaxHealthChanged(const FOnAttributeChangeData& Data);
 	void InitializeFeedbackMaterials();
 	void PlayDamageFeedback(int32 DamageAmount);
 	void SetHitFlashValue(float Value);
 
-	int32 CurrentHealth = 5;
-	float InvulnerabilityRemaining = 0.0f;
+	UPROPERTY(Transient)
+	TObjectPtr<URDCAAbilitySystemComponent> AbilitySystem;
+	bool bResettingHealth = false;
 	float HitFlashRemaining = 0.0f;
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UMaterialInstanceDynamic>> FeedbackMaterials;

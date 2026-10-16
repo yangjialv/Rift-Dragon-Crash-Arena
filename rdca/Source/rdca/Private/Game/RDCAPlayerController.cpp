@@ -1,6 +1,6 @@
 #include "Game/RDCAPlayerController.h"
 
-#include "Audio/RDCAAudio.h"
+#include "Abilities/RDCAPresentation.h"
 #include "Arena/ArenaFloorCollision.h"
 #include "Arena/ArenaPhaseController.h"
 #include "Blueprint/UserWidget.h"
@@ -19,6 +19,7 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Player/PhaseCrashComponent.h"
+#include "Player/RDCAPlayerControlComponent.h"
 #include "Player/PlayerHealthComponent.h"
 #include "rdca.h"
 
@@ -190,6 +191,15 @@ void ARDCAPlayerController::ToggleGamePause()
 {
 	const bool bPauseRequested = !IsPaused();
 	SetPause(bPauseRequested);
+	if (bPauseRequested && GetPawn())
+	{
+		if (URDCAPlayerControlComponent* Control = GetPawn()->FindComponentByClass<URDCAPlayerControlComponent>())
+		{
+			// A release during pause may not produce an Enhanced Input event. Never keep that old held intent.
+			Control->ClearActionRequests();
+			Control->CancelCrashCharge();
+		}
+	}
 	UE_LOG(
 		LogRDCAPlayer,
 		Log,
@@ -268,9 +278,9 @@ void ARDCAPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	if (IsValid(BossMusicAudio))
 	{
-		BossMusicAudio->Stop();
-		BossMusicAudio->DestroyComponent();
-		BossMusicAudio = nullptr;
+		UAudioComponent* Music = BossMusicAudio;
+		RDCAPresentation::StopLoop(this, ERDCAAudioCue::BossMusicMain, Music, 0.0f);
+		BossMusicAudio = Music;
 	}
 	Super::EndPlay(EndPlayReason);
 }
@@ -319,16 +329,16 @@ void ARDCAPlayerController::StartBossMusic()
 		{
 			return;
 		}
-		BossMusicAudio->Stop();
-		BossMusicAudio->DestroyComponent();
-		BossMusicAudio = nullptr;
+		UAudioComponent* Music = BossMusicAudio;
+		RDCAPresentation::StopLoop(this, ERDCAAudioCue::BossMusicMain, Music, 0.0f);
+		BossMusicAudio = Music;
 	}
 
 	// Starting a newly loaded long SoundWave at exactly zero can cause the audio
 	// device to discard the silent voice before the first volume interpolation.
 	// Start just above silence, then let UpdateBossMusic perform the normal fade.
 	CurrentBossMusicVolume = FMath::Max(BossMusicStartVolume, 0.001f);
-	BossMusicAudio = RDCAAudio::Spawn2D(
+	BossMusicAudio = RDCAPresentation::Spawn2D(
 		this,
 		ERDCAAudioCue::BossMusicMain,
 		CurrentBossMusicVolume,
@@ -571,14 +581,13 @@ void ARDCAPlayerController::FinishCombat(const ECombatResult NewResult)
 	CombatResult = NewResult;
 	if (IsValid(BossMusicAudio))
 	{
-		BossMusicAudio->FadeOut(
-			ArenaPhaseController.IsValid()
-				? FMath::Max(
-					ArenaPhaseController->GetBGMResultFadeOutDuration(), 0.0f)
-				: 2.5f,
-			0.0f);
+		UAudioComponent* Music = BossMusicAudio;
+		const float FadeOut = ArenaPhaseController.IsValid()
+			? FMath::Max(ArenaPhaseController->GetBGMResultFadeOutDuration(), 0.0f) : 2.5f;
+		RDCAPresentation::StopLoop(this, ERDCAAudioCue::BossMusicMain, Music, FadeOut);
+		BossMusicAudio = Music;
 	}
-	RDCAAudio::Play2D(
+	RDCAPresentation::Play2D(
 		this,
 		NewResult == ECombatResult::Victory
 			? ERDCAAudioCue::Victory

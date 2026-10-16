@@ -1,6 +1,8 @@
 #include "Boss/BossWeakPointComponent.h"
 
-#include "Audio/RDCAAudio.h"
+#include "Abilities/RDCAAbilitySystemComponent.h"
+#include "Abilities/RDCAHealthAttributeSet.h"
+#include "Abilities/RDCAPresentation.h"
 #include "GameFramework/Pawn.h"
 #include "rdca.h"
 
@@ -19,7 +21,53 @@ UBossWeakPointComponent::UBossWeakPointComponent(
 void UBossWeakPointComponent::BeginPlay()
 {
 	Super::BeginPlay();
-	CurrentHitPoints = FMath::Max(MaximumHitPoints, 1);
+	ResetWeakPoint();
+}
+
+void UBossWeakPointComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (AbilitySystem)
+	{
+		AbilitySystem->GetGameplayAttributeValueChangeDelegate(URDCAHealthAttributeSet::GetHealthAttribute()).RemoveAll(this);
+		AbilitySystem->GetGameplayAttributeValueChangeDelegate(URDCAHealthAttributeSet::GetMaxHealthAttribute()).RemoveAll(this);
+	}
+	Super::EndPlay(EndPlayReason);
+}
+
+void UBossWeakPointComponent::InitializeAbilitySystem()
+{
+	if (AbilitySystem)
+	{
+		return;
+	}
+	AbilitySystem = URDCAAbilitySystemComponent::FindOrCreateForActor(GetOwner());
+	if (AbilitySystem)
+	{
+		AbilitySystem->GetGameplayAttributeValueChangeDelegate(URDCAHealthAttributeSet::GetHealthAttribute())
+			.AddUObject(this, &ThisClass::HandleHealthChanged);
+		AbilitySystem->GetGameplayAttributeValueChangeDelegate(URDCAHealthAttributeSet::GetMaxHealthAttribute())
+			.AddUObject(this, &ThisClass::HandleHealthChanged);
+	}
+}
+
+int32 UBossWeakPointComponent::GetCurrentHitPoints() const
+{
+	return AbilitySystem && AbilitySystem->IsHealthInitialized()
+		? FMath::RoundToInt(AbilitySystem->GetHealth()) : FMath::Max(MaximumHitPoints, 1);
+}
+
+int32 UBossWeakPointComponent::GetMaximumHitPoints() const
+{
+	return AbilitySystem && AbilitySystem->IsHealthInitialized()
+		? FMath::RoundToInt(AbilitySystem->GetMaxHealth()) : FMath::Max(MaximumHitPoints, 1);
+}
+
+void UBossWeakPointComponent::HandleHealthChanged(const FOnAttributeChangeData& Data)
+{
+	if (!bResettingHealth)
+	{
+		OnHitPointsChanged.Broadcast(GetCurrentHitPoints(), GetMaximumHitPoints());
+	}
 }
 
 void UBossWeakPointComponent::SetExposed(const bool bNewExposed)
@@ -35,8 +83,14 @@ void UBossWeakPointComponent::SetExposed(const bool bNewExposed)
 
 void UBossWeakPointComponent::ResetWeakPoint()
 {
-	CurrentHitPoints = FMath::Max(MaximumHitPoints, 1);
-	OnHitPointsChanged.Broadcast(CurrentHitPoints, MaximumHitPoints);
+	InitializeAbilitySystem();
+	if (!AbilitySystem)
+	{
+		return;
+	}
+	TGuardValue<bool> ResetGuard(bResettingHealth, true);
+	AbilitySystem->ResetHealth(FMath::Max(MaximumHitPoints, 1));
+	OnHitPointsChanged.Broadcast(GetCurrentHitPoints(), GetMaximumHitPoints());
 }
 
 bool UBossWeakPointComponent::ReceiveCrash(
@@ -44,33 +98,36 @@ bool UBossWeakPointComponent::ReceiveCrash(
 	const FHitResult& Hit,
 	const bool bIsQualifiedHeavyCrash)
 {
+	InitializeAbilitySystem();
+	if (AbilitySystem && !AbilitySystem->IsHealthInitialized())
+	{
+		ResetWeakPoint();
+	}
 	const bool bWasEffective =
 		bExposed
 		&& bIsQualifiedHeavyCrash
-		&& !IsBossDefeated();
+		&& !IsBossDefeated()
+		&& AbilitySystem
+		&& AbilitySystem->ApplyDamage(FMath::Max(DamagePerQualifiedCrash, 1), CrashingPawn);
 
 	if (bWasEffective)
 	{
 		const float ImpactVolume = FMath::Max(
 			WeakPointImpactVolumeMultiplier, 0.0f);
-		CurrentHitPoints = FMath::Max(
-			CurrentHitPoints - FMath::Max(DamagePerQualifiedCrash, 1),
-			0);
-		OnHitPointsChanged.Broadcast(CurrentHitPoints, MaximumHitPoints);
-		RDCAAudio::PlayAtLocation(
+		RDCAPresentation::PlayAtLocation(
 			this,
 			ERDCAAudioCue::WeakPointHit,
 			Hit.ImpactPoint,
 			0.95f * ImpactVolume);
 		// A qualified weak-point crash needs to sit above an ordinary Anchor
 		// fracture in the mix: glass/transient, low body impact, then Boss pain.
-		RDCAAudio::PlayAtLocation(
+		RDCAPresentation::PlayAtLocation(
 			this,
 			ERDCAAudioCue::AnchorShatter,
 			Hit.ImpactPoint,
 			0.58f * ImpactVolume,
 			0.88f);
-		RDCAAudio::PlayAtLocation(
+		RDCAPresentation::PlayAtLocation(
 			this,
 			ERDCAAudioCue::BossBodyRebound,
 			Hit.ImpactPoint,
@@ -78,7 +135,7 @@ bool UBossWeakPointComponent::ReceiveCrash(
 			0.72f);
 		if (!IsBossDefeated())
 		{
-			RDCAAudio::PlayAtLocation(
+			RDCAPresentation::PlayAtLocation(
 				this,
 				ERDCAAudioCue::BossRoar,
 				GetOwner()->GetActorLocation(),
@@ -88,7 +145,7 @@ bool UBossWeakPointComponent::ReceiveCrash(
 	}
 	else
 	{
-		RDCAAudio::PlayAtLocation(
+		RDCAPresentation::PlayAtLocation(
 			this,
 			ERDCAAudioCue::BossBodyRebound,
 			Hit.ImpactPoint,
@@ -105,7 +162,7 @@ bool UBossWeakPointComponent::ReceiveCrash(
 		bWasEffective ? TEXT("true") : TEXT("false"),
 		bExposed ? TEXT("true") : TEXT("false"),
 		bIsQualifiedHeavyCrash ? TEXT("true") : TEXT("false"),
-		CurrentHitPoints,
-		MaximumHitPoints);
+		GetCurrentHitPoints(),
+		GetMaximumHitPoints());
 	return bWasEffective;
 }

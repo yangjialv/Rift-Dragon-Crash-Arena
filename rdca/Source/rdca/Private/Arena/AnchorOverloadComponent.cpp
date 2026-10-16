@@ -1,6 +1,6 @@
 #include "Arena/AnchorOverloadComponent.h"
 
-#include "Audio/RDCAAudio.h"
+#include "Abilities/RDCAPresentation.h"
 #include "Arena/AttachSurfaceComponent.h"
 #include "Arena/AnchorSpawnManager.h"
 #include "Arena/ArenaPhaseController.h"
@@ -63,7 +63,7 @@ void UAnchorOverloadComponent::EndPlay(
 	const EEndPlayReason::Type EndPlayReason)
 {
 	UAudioComponent* Loop = OverloadLoopAudio.Get();
-	RDCAAudio::StopLoop(Loop, 0.03f);
+	RDCAPresentation::StopLoop(this, ERDCAAudioCue::AnchorOverloadLoop, Loop, 0.03f);
 	OverloadLoopAudio = Loop;
 	Super::EndPlay(EndPlayReason);
 }
@@ -110,14 +110,14 @@ void UAnchorOverloadComponent::NotifyPlayerAttached(APawn* PlayerPawn)
 
 	if (AttachedPlayer.Get() != PlayerPawn)
 	{
-		RDCAAudio::PlayAtLocation(
+		RDCAPresentation::PlayAtLocation(
 			this,
 			ERDCAAudioCue::AnchorAttach,
 			GetOwner()->GetActorLocation(),
 			0.58f);
 		if (!OverloadLoopAudio && GetOwner()->GetRootComponent())
 		{
-			OverloadLoopAudio = RDCAAudio::SpawnLoopAttached(
+			OverloadLoopAudio = RDCAPresentation::SpawnLoopAttached(
 				ERDCAAudioCue::AnchorOverloadLoop,
 				GetOwner()->GetRootComponent(),
 				0.22f,
@@ -136,7 +136,7 @@ void UAnchorOverloadComponent::NotifyPlayerDetached(APawn* PlayerPawn)
 
 	AttachedPlayer.Reset();
 	UAudioComponent* Loop = OverloadLoopAudio.Get();
-	RDCAAudio::StopLoop(Loop);
+	RDCAPresentation::StopLoop(this, ERDCAAudioCue::AnchorOverloadLoop, Loop);
 	OverloadLoopAudio = Loop;
 }
 
@@ -218,9 +218,9 @@ void UAnchorOverloadComponent::ShatterAfterPlayerDeparture()
 
 	AttachedPlayer.Reset();
 	UAudioComponent* Loop = OverloadLoopAudio.Get();
-	RDCAAudio::StopLoop(Loop, 0.03f);
+	RDCAPresentation::StopLoop(this, ERDCAAudioCue::AnchorOverloadLoop, Loop, 0.03f);
 	OverloadLoopAudio = Loop;
-	RDCAAudio::PlayAtLocation(
+	RDCAPresentation::PlayAtLocation(
 		this,
 		ERDCAAudioCue::AnchorLaunch,
 		GetOwner()->GetActorLocation(),
@@ -233,9 +233,9 @@ void UAnchorOverloadComponent::TriggerOverload(
 {
 	APawn* PlayerPawn = AttachedPlayer.Get();
 	UAudioComponent* Loop = OverloadLoopAudio.Get();
-	RDCAAudio::StopLoop(Loop, 0.03f);
+	RDCAPresentation::StopLoop(this, ERDCAAudioCue::AnchorOverloadLoop, Loop, 0.03f);
 	OverloadLoopAudio = Loop;
-	RDCAAudio::PlayAtLocation(
+	RDCAPresentation::PlayAtLocation(
 		this,
 		ERDCAAudioCue::AnchorShatter,
 		GetOwner()->GetActorLocation(),
@@ -314,7 +314,7 @@ void UAnchorOverloadComponent::FinishRecovery()
 	SpawnedFractureActor.Reset();
 	CurrentOverloadAlpha = 0.0f;
 	SetAnchorAvailable(true);
-	RDCAAudio::PlayAtLocation(
+	RDCAPresentation::PlayAtLocation(
 		this,
 		ERDCAAudioCue::AnchorEmerge,
 		GetOwner()->GetActorLocation(),

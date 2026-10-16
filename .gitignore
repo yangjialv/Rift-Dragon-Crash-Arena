@@ -28,6 +28,8 @@ rdca/Content/__ExternalActors__/ThirdPerson/Maps/ThirdPersonMap/D/SY/Z4CTQ4LG3YV
 # Local backups and upgrade reports
 **/Backup/
 **/UpgradeLog*.htm
+docs/* back.md
+docs/* copy.md
 
 # Local audio credentials, tooling and generated audition candidates
 .local/

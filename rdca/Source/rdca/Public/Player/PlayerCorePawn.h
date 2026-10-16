@@ -1,22 +1,23 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "AbilitySystemInterface.h"
 #include "GameFramework/Pawn.h"
 #include "PlayerCorePawn.generated.h"
 
 class UCameraComponent;
+class URDCAPlayerControlComponent;
+class URDCASlimePresentationComponent;
+class URDCACombatCameraComponent;
+class URDCAAbilitySystemComponent;
 class UInputAction;
 class UInputMappingContext;
-class UMaterialInstanceDynamic;
-class UMeshComponent;
 class UPhaseCrashComponent;
 class UPlayerHealthComponent;
-class AArenaCombatBounds;
 class USphereComponent;
 class USpringArmComponent;
 class UStaticMeshComponent;
 class UFloatingPawnMovement;
-struct FInputActionValue;
 
 UENUM(BlueprintType)
 enum class EPlayerSlimeState : uint8
@@ -64,18 +65,21 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	NewState);
 
 UCLASS()
-class RDCA_API APlayerCorePawn : public APawn
+class RDCA_API APlayerCorePawn : public APawn, public IAbilitySystemInterface
 {
 	GENERATED_BODY()
 
 public:
 	APlayerCorePawn();
+	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
+	virtual void PossessedBy(AController* NewController) override;
+	virtual void UnPossessed() override;
 
 	virtual void Tick(float DeltaTime) override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
 	UFUNCTION(BlueprintPure, Category = "Player|Presentation")
-	EPlayerSlimeState GetSlimeState() const { return SlimeState; }
+	EPlayerSlimeState GetSlimeState() const;
 
 	UPROPERTY(BlueprintAssignable, Category = "Player|Presentation")
 	FOnPlayerSlimeStateChanged OnSlimeStateChanged;
@@ -84,25 +88,14 @@ protected:
 	virtual void BeginPlay() override;
 
 private:
-	void FindBossCameraTarget();
-	void UpdateCombatCamera(float DeltaTime);
-	void UpdateCameraOccluders();
-	bool IsCameraOccluderActor(const AActor& Actor) const;
-	FVector GetCameraOcclusionCenter();
-	void UpdateSlimePresentation(float DeltaTime);
-	void UpdateSlimeMaterialParameters(
-		float MovementAlpha,
-		const FVector& FlowDirection,
-		const FVector& SupportNormal,
-		float OriginalBottomDepth);
-	void SetSlimeState(EPlayerSlimeState NewState);
-	void Move(const FInputActionValue& Value);
-	void StartCrashCharge();
-	void ReleaseCrash();
-	void CancelCrashCharge();
-	void StartGroundDash();
+	friend class URDCAPlayerControlComponent;
+	friend class URDCASlimePresentationComponent;
+	friend class URDCACombatCameraComponent;
 
 protected:
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Player|Components")
+	TObjectPtr<URDCAAbilitySystemComponent> AbilitySystemComponent;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Player|Components")
 	TObjectPtr<USphereComponent> CollisionComponent;
 
@@ -123,6 +116,16 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Player|Components")
 	TObjectPtr<UPlayerHealthComponent> HealthComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Player|Components")
+	TObjectPtr<URDCAPlayerControlComponent> PlayerControl;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Player|Components")
+	TObjectPtr<URDCASlimePresentationComponent> SlimePresentation;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Player|Components")
+	TObjectPtr<URDCACombatCameraComponent> CombatCamera;
+
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Input")
 	TObjectPtr<UInputMappingContext> PlayerMappingContext;
@@ -266,24 +269,4 @@ protected:
 		meta = (ClampMin = "0.0"))
 	float DashReboundDuration = 0.22f;
 
-private:
-	TWeakObjectPtr<AActor> BossCameraTarget;
-	EPlayerSlimeState SlimeState = EPlayerSlimeState::Idle;
-	FVector BaseVisualScale = FVector::OneVector;
-	FVector BaseVisualLocation = FVector::ZeroVector;
-	FRotator BaseVisualRotation = FRotator::ZeroRotator;
-	float BaseVisualBottomDistance = 50.0f;
-	FVector PreviousPresentationLocation = FVector::ZeroVector;
-	FVector LastFacingDirection = FVector::ForwardVector;
-	float PresentationTime = 0.0f;
-	float LocomotionPhase = 0.0f;
-	float SlimeStateElapsed = 0.0f;
-	float SurfaceImpactEnergy = 0.0f;
-	float DashReboundRemaining = 0.0f;
-	FVector PreviousAttachedNormal = FVector::ZeroVector;
-	/** Runtime instance of VisualMesh material slot 0. It supplies state data to the liquid WPO material. */
-	TObjectPtr<UMaterialInstanceDynamic> SlimeMaterialInstance;
-	FVector LastCameraOcclusionOutward = FVector::ForwardVector;
-	TWeakObjectPtr<AArenaCombatBounds> CameraOcclusionArenaBounds;
-	TSet<TWeakObjectPtr<UMeshComponent>> CameraOccludedComponents;
 };

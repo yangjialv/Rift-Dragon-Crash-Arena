@@ -1,6 +1,6 @@
 #include "Arena/ArenaIntroDirector.h"
 
-#include "Audio/RDCAAudio.h"
+#include "Abilities/RDCAPresentation.h"
 #include "Arena/AnchorSpawnManager.h"
 #include "Boss/BossAnimationComponent.h"
 #include "Components/PrimitiveComponent.h"
@@ -61,7 +61,7 @@ void AArenaIntroDirector::HandleBossAnimationEvent(
 	switch (AnimationEvent)
 	{
 	case EBossAnimationEvent::IntroTakeoff:
-		RDCAAudio::PlayAtLocation(
+		RDCAPresentation::PlayAtLocation(
 			this,
 			ERDCAAudioCue::BossTakeoff,
 			BossActor ? BossActor->GetActorLocation() : GetActorLocation(),
@@ -215,7 +215,7 @@ void AArenaIntroDirector::ShatterCyberCenter()
 		return;
 	}
 	bCyberCenterShattered = true;
-	RDCAAudio::PlayAtLocation(
+	RDCAPresentation::PlayAtLocation(
 		this,
 		ERDCAAudioCue::CyberCenterFracture,
 		CyberCenterActor

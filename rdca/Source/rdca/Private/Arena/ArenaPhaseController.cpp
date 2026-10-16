@@ -1,6 +1,6 @@
 #include "Arena/ArenaPhaseController.h"
 
-#include "Audio/RDCAAudio.h"
+#include "Abilities/RDCAPresentation.h"
 #include "Boss/BossEncounterComponent.h"
 #include "Components/ActorComponent.h"
 #include "Components/AudioComponent.h"
@@ -99,7 +99,7 @@ void AArenaPhaseController::EndPlay(
 	const EEndPlayReason::Type EndPlayReason)
 {
 	UAudioComponent* Loop = PhaseTransitionLoopAudio.Get();
-	RDCAAudio::StopLoop(Loop, 0.03f);
+	RDCAPresentation::StopLoop(this, ERDCAAudioCue::PhaseTransitionLoop, Loop, 0.03f);
 	PhaseTransitionLoopAudio = Loop;
 	Super::EndPlay(EndPlayReason);
 }
@@ -189,12 +189,12 @@ void AArenaPhaseController::StartPhaseTransition()
 	bTransitionActive = true;
 	TransitionElapsed = 0.0f;
 	CurrentRadius = 0.0f;
-	RDCAAudio::PlayAtLocation(
+	RDCAPresentation::PlayAtLocation(
 		this,
 		ERDCAAudioCue::PhaseTransitionStart,
 		PhaseOrigin,
 		0.88f);
-	RDCAAudio::PlayAtLocation(
+	RDCAPresentation::PlayAtLocation(
 		this,
 		ERDCAAudioCue::BossRoar,
 		PhaseOrigin,
@@ -202,7 +202,7 @@ void AArenaPhaseController::StartPhaseTransition()
 		0.8f);
 	if (!PhaseTransitionLoopAudio)
 	{
-		PhaseTransitionLoopAudio = RDCAAudio::SpawnLoopAtLocation(
+		PhaseTransitionLoopAudio = RDCAPresentation::SpawnLoopAtLocation(
 			this,
 			ERDCAAudioCue::PhaseTransitionLoop,
 			PhaseOrigin,
@@ -463,14 +463,14 @@ void AArenaPhaseController::RevealPair(FPhaseActorPair& Pair)
 void AArenaPhaseController::FinalizeSourceCodeVoid()
 {
 	UAudioComponent* Loop = PhaseTransitionLoopAudio.Get();
-	RDCAAudio::StopLoop(Loop, 0.12f);
+	RDCAPresentation::StopLoop(this, ERDCAAudioCue::PhaseTransitionLoop, Loop, 0.12f);
 	PhaseTransitionLoopAudio = Loop;
-	RDCAAudio::PlayAtLocation(
+	RDCAPresentation::PlayAtLocation(
 		this,
 		ERDCAAudioCue::PhaseTransitionEnd,
 		PhaseOrigin,
 		0.88f);
-	RDCAAudio::PlayAtLocation(
+	RDCAPresentation::PlayAtLocation(
 		this,
 		ERDCAAudioCue::ShockwaveRelease,
 		PhaseOrigin,

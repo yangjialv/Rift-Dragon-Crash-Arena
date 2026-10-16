@@ -1,6 +1,6 @@
 #include "Boss/BossSweepLaser.h"
 
-#include "Audio/RDCAAudio.h"
+#include "Abilities/RDCAPresentation.h"
 #include "Arena/AnchorOverloadComponent.h"
 #include "Arena/ArenaFloorCollision.h"
 #include "Components/BoxComponent.h"
@@ -196,6 +196,7 @@ ABossSweepLaser::ABossSweepLaser()
 
 void ABossSweepLaser::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	RDCAPresentation::SetLaserFlame(LaserEffect, false, true);
 	FinishLaserAudio(bLaserActive || LaserLoopAudio != nullptr);
 	Super::EndPlay(EndPlayReason);
 }
@@ -219,7 +220,7 @@ void ABossSweepLaser::InitializeLaser(
 	SetActorRotation(FRotator(0.0f, StartYaw, 0.0f));
 	UpdateComponentDimensions();
 	ApplyPhaseNiagaraSystem(bUsePhase2Effect);
-	LaserEffect->DeactivateImmediate();
+	RDCAPresentation::SetLaserFlame(LaserEffect, false, true);
 
 	if (UMaterialInterface* Warning = GroundWarningMaterial
 		? GroundWarningMaterial.Get()
@@ -228,7 +229,7 @@ void ABossSweepLaser::InitializeLaser(
 		GroundWarningVisual->SetMaterial(0, Warning);
 	}
 	UpdateGroundWarningVisual();
-	RDCAAudio::PlayAtLocation(
+	RDCAPresentation::PlayAtLocation(
 		this,
 		ERDCAAudioCue::LaserWarning,
 		GetActorLocation(),
@@ -282,16 +283,16 @@ void ABossSweepLaser::ActivateLaser()
 	}
 	if (LaserEffect->GetAsset())
 	{
-		LaserEffect->Activate(true);
+		RDCAPresentation::SetLaserFlame(LaserEffect, true);
 	}
-	RDCAAudio::PlayAtLocation(
+	RDCAPresentation::PlayAtLocation(
 		this,
 		ERDCAAudioCue::LaserIgnite,
 		GetActorLocation(),
 		0.62f);
 	if (!LaserLoopAudio)
 	{
-		LaserLoopAudio = RDCAAudio::SpawnLoopAttached(
+		LaserLoopAudio = RDCAPresentation::SpawnLoopAttached(
 			ERDCAAudioCue::LaserLoop,
 			BeamRoot,
 			0.46f);
@@ -420,7 +421,7 @@ void ABossSweepLaser::Tick(const float DeltaTime)
 	{
 		bLaserActive = false;
 		DamageVolume->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		LaserEffect->Deactivate();
+		RDCAPresentation::SetLaserFlame(LaserEffect, false);
 		FinishLaserAudio(true);
 	}
 }
@@ -428,12 +429,12 @@ void ABossSweepLaser::Tick(const float DeltaTime)
 void ABossSweepLaser::FinishLaserAudio(const bool bPlayEndCue)
 {
 	UAudioComponent* Loop = LaserLoopAudio.Get();
-	RDCAAudio::StopLoop(Loop, 0.08f);
+	RDCAPresentation::StopLoop(this, ERDCAAudioCue::LaserLoop, Loop, 0.08f);
 	LaserLoopAudio = Loop;
 	if (bPlayEndCue && !bLaserEndAudioPlayed)
 	{
 		bLaserEndAudioPlayed = true;
-		RDCAAudio::PlayAtLocation(
+		RDCAPresentation::PlayAtLocation(
 			this,
 			ERDCAAudioCue::LaserEnd,
 			GetActorLocation(),

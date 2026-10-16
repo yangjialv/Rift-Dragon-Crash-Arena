@@ -1,6 +1,10 @@
 #include "Player/PhaseCrashComponent.h"
+#include "Player/RDCAPlayerControlComponent.h"
 
-#include "Audio/RDCAAudio.h"
+#include "Abilities/RDCAAbilitySystemComponent.h"
+#include "Abilities/RDCAGameplayTags.h"
+#include "Abilities/GameplayAbilityTargetTypes.h"
+#include "Abilities/RDCAPresentation.h"
 #include "Arena/ArenaCombatBounds.h"
 #include "Arena/ArenaFloorCollision.h"
 #include "Arena/AttachSurfaceComponent.h"
@@ -11,8 +15,6 @@
 #include "Components/PrimitiveComponent.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PawnMovementComponent.h"
-#include "GameFramework/PlayerController.h"
-#include "Game/RDCAPlayerController.h"
 #include "EngineUtils.h"
 #include "rdca.h"
 
@@ -39,43 +41,7 @@ const TCHAR* LexToString(const EPhaseCrashState State)
 	}
 }
 
-bool IsDirectCrashAimTarget(const FHitResult& Hit)
-{
-	AActor* HitActor = Hit.GetActor();
-	return IsValid(HitActor)
-		&& (HitActor->FindComponentByClass<UCrashResponseComponent>()
-			|| HitActor->FindComponentByClass<UBossWeakPointComponent>());
-}
 
-bool IsBossCrashAimTarget(const FHitResult& Hit)
-{
-	AActor* HitActor = Hit.GetActor();
-	return (IsValid(HitActor)
-			&& (HitActor->FindComponentByClass<UBossEncounterComponent>()
-				|| HitActor->FindComponentByClass<UBossWeakPointComponent>()))
-		|| Cast<UBossWeakPointComponent>(Hit.GetComponent()) != nullptr;
-}
-
-void SetAimCursor(
-	APlayerController& PlayerController,
-	const ERDCAAimCursorState State)
-{
-	if (ARDCAPlayerController* RDCAController =
-			Cast<ARDCAPlayerController>(&PlayerController))
-	{
-		RDCAController->SetAimCursorState(State);
-	}
-}
-
-float GetArenaAimPlaneZ(const UWorld& World, const APawn& OwnerPawn)
-{
-	for (TActorIterator<AArenaCombatBounds> It(&World); It; ++It)
-	{
-		return It->GetArenaCenter().Z;
-	}
-	// Keeps older maps functional when they have not added Arena Combat Bounds.
-	return OwnerPawn.GetActorLocation().Z;
-}
 
 AArenaFloorCollision* FindArenaFloorCollision(UWorld* World)
 {
@@ -110,6 +76,27 @@ void UPhaseCrashComponent::BeginPlay()
 			*GetNameSafe(GetOwner()));
 		SetComponentTickEnabled(false);
 	}
+	else
+	{
+		AbilitySystem = URDCAAbilitySystemComponent::FindOrCreateForActor(OwnerPawn);
+		if (AbilitySystem)
+		{
+			AbilitySystem->GrantPlayerAbilities();
+			PlayerControl = URDCAPlayerControlComponent::FindOrCreateForPawn(OwnerPawn);
+		}
+	}
+}
+
+void UPhaseCrashComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (AbilitySystem)
+	{
+		FGameplayTagContainer Tags;
+		Tags.AddTag(RDCAGameplayTags::Ability_Player_GroundDash);
+		Tags.AddTag(RDCAGameplayTags::Ability_Player_PhaseCrash);
+		AbilitySystem->CancelAbilities(&Tags);
+	}
+	Super::EndPlay(EndPlayReason);
 }
 
 void UPhaseCrashComponent::TickComponent(
@@ -137,16 +124,7 @@ void UPhaseCrashComponent::TickComponent(
 		{
 			MoveAttached(FVector2D::ZeroVector);
 		}
-		UpdateAimTarget();
-		if (APlayerController* PlayerController =
-				Cast<APlayerController>(OwnerPawn ? OwnerPawn->GetController() : nullptr))
-		{
-			SetAimCursor(
-				*PlayerController,
-				bAimingAtBoss
-					? ERDCAAimCursorState::BossTarget
-					: ERDCAAimCursorState::Charging);
-		}
+
 		break;
 
 	case EPhaseCrashState::Crashing:
@@ -180,7 +158,7 @@ void UPhaseCrashComponent::TickComponent(
 		break;
 	}
 
-	ConsumeBufferedInputs(DeltaTime);
+	OnMotionUpdated.Broadcast(DeltaTime);
 
 	if (CrashState != EPhaseCrashState::Crashing
 		&& CrashState != EPhaseCrashState::Attached
@@ -192,69 +170,78 @@ void UPhaseCrashComponent::TickComponent(
 
 void UPhaseCrashComponent::StartCharging()
 {
-	if (!OwnerPawn)
-	{
-		return;
-	}
-	bCrashInputHeld = true;
-	bCrashInputBuffered = true;
-	if (CrashState != EPhaseCrashState::Ready
-		&& CrashState != EPhaseCrashState::Attached)
-	{
-		UE_LOG(
-			LogRDCAPlayer,
-			Verbose,
-			TEXT("Crash aim buffered. State=%d Cooldown=%.2f"),
-			static_cast<int32>(CrashState),
-			CooldownRemaining);
-		return;
-	}
-
-	BeginCrashAim();
+	if (PlayerControl) { PlayerControl->StartCrashCharge(); }
 }
 
-void UPhaseCrashComponent::BeginCrashAim()
-{
-	if (!OwnerPawn
-		|| (CrashState != EPhaseCrashState::Ready
-			&& CrashState != EPhaseCrashState::Attached))
-	{
-		return;
-	}
 
+
+bool UPhaseCrashComponent::CanStartCrashCharge() const
+{
+	return CanAcceptActionInput() && OwnerPawn->GetRootComponent()
+		&& (CrashState == EPhaseCrashState::Ready || CrashState == EPhaseCrashState::Attached);
+}
+
+bool UPhaseCrashComponent::RequestCrashChargeAtLocation(const FVector& WorldTarget, const AActor* TargetActor)
+{
+	return PlayerControl && PlayerControl->RequestCrashChargeAtLocation(WorldTarget, TargetActor);
+}
+
+bool UPhaseCrashComponent::RequestCrashAim(
+	const FVector& WorldTarget, const AActor* TargetActor, const bool bWorldSpaceAim)
+{
+	if (!AbilitySystem || !CanStartCrashCharge() || WorldTarget.ContainsNaN()) { return false; }
+	FGameplayEventData Event;
+	Event.EventTag = bWorldSpaceAim ? RDCAGameplayTags::Event_Player_PhaseCrash_Begin_WorldSpace
+		: RDCAGameplayTags::Event_Player_PhaseCrash_Begin;
+	Event.Instigator = OwnerPawn;
+	Event.Target = TargetActor;
+	FGameplayAbilityTargetData_LocationInfo* Target = new FGameplayAbilityTargetData_LocationInfo();
+	Target->TargetLocation.LiteralTransform = FTransform(WorldTarget);
+	Event.TargetData.Add(Target);
+	const int32 Activated = AbilitySystem->HandleGameplayEvent(Event.EventTag, &Event);
+	return Activated > 0 && CrashState == EPhaseCrashState::Charging;
+}
+
+bool UPhaseCrashComponent::ExecuteCrashAim(
+	const FVector& WorldTarget, const AActor* TargetActor, const bool bWorldSpaceAim)
+{
+	if (!CanStartCrashCharge() || WorldTarget.ContainsNaN()) { return false; }
 	bChargingFromAttachment = CrashState == EPhaseCrashState::Attached;
-	if (!UpdateAimTarget())
-	{
-		return;
-	}
-	bCrashInputBuffered = false;
+	AimTarget = WorldTarget;
+	CurrentAimActor = TargetActor;
+	bAimingAtBoss = bChargingFromAttachment && IsValid(TargetActor)
+		&& (TargetActor->FindComponentByClass<UBossEncounterComponent>()
+			|| TargetActor->FindComponentByClass<UBossWeakPointComponent>());
+	if (PlayerControl) { PlayerControl->NotifyChargeStarted(bWorldSpaceAim); }
+	bUsesGASCrashCooldown = true;
+	bUsesGASDashCooldown = false;
 	if (UPawnMovementComponent* Movement = OwnerPawn->GetMovementComponent())
 	{
 		Movement->StopMovementImmediately();
 	}
 	ChargeElapsed = 0.0f;
 	SetCrashState(EPhaseCrashState::Charging);
+	return true;
 }
 
 void UPhaseCrashComponent::ReleaseCrash()
 {
-	bCrashInputHeld = false;
-	if (CrashState != EPhaseCrashState::Charging || !OwnerPawn)
-	{
-		bCrashInputBuffered = false;
-		return;
-	}
+	if (PlayerControl) { PlayerControl->ReleaseCrash(); }
+}
 
-	UpdateAimTarget();
+bool UPhaseCrashComponent::ExecuteCrashRelease()
+{
+	if (CrashState != EPhaseCrashState::Charging || !CanAcceptActionInput()) { return false; }
 
 	if (!CalculateTrajectory(CrashStart, CrashEnd, ActiveArcHeight, CrashDuration))
 	{
-		CancelCharging();
-		return;
+		return false;
 	}
 
 	bActiveCrashFromAttachment = bChargingFromAttachment;
+	bUsesGASDashCooldown = false;
 	bActiveBossCrash = bChargingFromAttachment && bAimingAtBoss;
+	MotionType = bActiveBossCrash ? EPhaseCrashMotionType::BossDirect : EPhaseCrashMotionType::Jump;
 	bWeakPointDamageAppliedThisCrash = false;
 	TWeakObjectPtr<AActor> DepartureAnchor;
 	if (bChargingFromAttachment)
@@ -264,18 +251,14 @@ void UPhaseCrashComponent::ReleaseCrash()
 	DetachFromCrashTarget();
 	bChargingFromAttachment = false;
 	bAimingAtBoss = false;
-	if (APlayerController* PlayerController =
-			Cast<APlayerController>(OwnerPawn->GetController()))
-	{
-		SetAimCursor(*PlayerController, ERDCAAimCursorState::Normal);
-	}
+
 	ClearTemporaryMoveIgnores();
 	CrashElapsed = 0.0f;
 	VerticalVelocity = 0.0f;
 	ActiveCooldownDuration = CooldownDuration;
 	bCurrentCrashRefreshesOnLanding = true;
 	SetCrashState(EPhaseCrashState::Crashing);
-	RDCAAudio::PlayAtLocation(
+	RDCAPresentation::PlayAtLocation(
 		this,
 		ERDCAAudioCue::PlayerJumpRelease,
 		OwnerPawn->GetActorLocation(),
@@ -297,43 +280,80 @@ void UPhaseCrashComponent::ReleaseCrash()
 		FVector::Dist2D(CrashStart, CrashEnd),
 		ActiveArcHeight,
 		CrashDuration);
+	return true;
 }
 
 void UPhaseCrashComponent::CancelCharging()
 {
-	bCrashInputHeld = false;
-	bCrashInputBuffered = false;
+	if (PlayerControl) { PlayerControl->CancelCrashCharge(); }
+}
+
+void UPhaseCrashComponent::ClearBufferedActionInput()
+{
+	if (PlayerControl) { PlayerControl->ClearActionRequests(); }
+}
+
+void UPhaseCrashComponent::CancelCrashExecution()
+{
+	if (!bUsesGASCrashCooldown) { return; }
+	const bool bReturnToAttachment = CrashState == EPhaseCrashState::Charging
+		&& bChargingFromAttachment && AttachedActor.IsValid() && AttachedSurfaceComponent.IsValid()
+		&& (!AbilitySystem || !AbilitySystem->HasMatchingGameplayTag(RDCAGameplayTags::State_Dead));
+	bUsesGASCrashCooldown = false;
+	bChargingFromAttachment = false;
+	bActiveCrashFromAttachment = false;
+	bActiveBossCrash = false;
 	bAimingAtBoss = false;
-	if (APlayerController* PlayerController =
-			Cast<APlayerController>(OwnerPawn ? OwnerPawn->GetController() : nullptr))
+	bCurrentCrashRefreshesOnLanding = false;
+	CrashElapsed = CrashDuration = RecoveryRemaining = CooldownRemaining = ActiveCooldownDuration = 0.0f;
+	VerticalVelocity = 0.0f;
+	ClearBufferedActionInput();
+	MotionType = EPhaseCrashMotionType::None;
+	if (!bReturnToAttachment)
 	{
-		SetAimCursor(*PlayerController, ERDCAAimCursorState::Normal);
+		DetachFromCrashTarget();
+		ClearTemporaryMoveIgnores();
 	}
-	if (CrashState == EPhaseCrashState::Charging)
-	{
-		const bool bReturnToAttachment =
-			bChargingFromAttachment && AttachedActor.IsValid();
-		bChargingFromAttachment = false;
-		SetCrashState(
-			bReturnToAttachment
-				? EPhaseCrashState::Attached
-				: EPhaseCrashState::Ready);
-	}
+	SetCrashState(bReturnToAttachment ? EPhaseCrashState::Attached : EPhaseCrashState::Ready);
 }
 
 void UPhaseCrashComponent::StartGroundDash()
 {
-	if ((CrashState != EPhaseCrashState::Ready
-			&& CrashState != EPhaseCrashState::Attached)
-		|| !OwnerPawn)
+	if (PlayerControl) { PlayerControl->StartGroundDash(); }
+}
+
+bool UPhaseCrashComponent::CanAcceptActionInput() const
+{
+	return OwnerPawn && OwnerPawn->InputEnabled() && IsComponentTickEnabled()
+		&& GetWorld() && !GetWorld()->IsPaused()
+		&& (!AbilitySystem || !AbilitySystem->HasMatchingGameplayTag(RDCAGameplayTags::State_Dead));
+}
+
+bool UPhaseCrashComponent::CanStartGroundDash() const
+{
+	return CanAcceptActionInput() && OwnerPawn->GetRootComponent()
+		&& (CrashState == EPhaseCrashState::Ready || CrashState == EPhaseCrashState::Attached);
+}
+
+bool UPhaseCrashComponent::RequestGroundDashAtLocation(const FVector& WorldTarget)
+{
+	return PlayerControl && PlayerControl->RequestGroundDashAtLocation(WorldTarget);
+}
+
+bool UPhaseCrashComponent::ExecuteGroundDash(const FVector& WorldTarget)
+{
+	if (!CanStartGroundDash() || WorldTarget.ContainsNaN())
 	{
-		if (OwnerPawn)
-		{
-			DashInputBufferRemaining = DashInputBufferDuration;
-		}
-		return;
+		return false;
 	}
-	DashInputBufferRemaining = 0.0f;
+	const FVector Start = OwnerPawn->GetActorLocation();
+	FVector DashDirection = WorldTarget - Start;
+	DashDirection.Z = 0.0f;
+	const float CursorDistance = DashDirection.Size();
+	if (!DashDirection.Normalize() || CursorDistance <= UE_KINDA_SMALL_NUMBER || GroundDashDistance <= 0.0f)
+	{
+		return false;
+	}
 	const bool bDashingFromAttachment =
 		CrashState == EPhaseCrashState::Attached && AttachedActor.IsValid();
 	TWeakObjectPtr<AActor> DepartureAnchor;
@@ -342,16 +362,8 @@ void UPhaseCrashComponent::StartGroundDash()
 		DepartureAnchor = AttachedActor;
 	}
 
-	if (!UpdateAimTarget())
-	{
-		return;
-	}
 	bAimingAtBoss = false;
-	if (APlayerController* PlayerController =
-			Cast<APlayerController>(OwnerPawn->GetController()))
-	{
-		SetAimCursor(*PlayerController, ERDCAAimCursorState::Normal);
-	}
+
 	if (UPawnMovementComponent* Movement = OwnerPawn->GetMovementComponent())
 	{
 		Movement->StopMovementImmediately();
@@ -362,14 +374,7 @@ void UPhaseCrashComponent::StartGroundDash()
 	bActiveBossCrash = false;
 	bWeakPointDamageAppliedThisCrash = false;
 	ClearTemporaryMoveIgnores();
-	CrashStart = OwnerPawn->GetActorLocation();
-	FVector DashDirection = AimTarget - CrashStart;
-	DashDirection.Z = 0.0f;
-	const float CursorDistance = DashDirection.Size();
-	if (!DashDirection.Normalize() || CursorDistance <= UE_KINDA_SMALL_NUMBER)
-	{
-		return;
-	}
+	CrashStart = Start;
 
 	const float TravelDistance = FMath::Min(CursorDistance, GroundDashDistance);
 	CrashEnd = CrashStart + DashDirection * TravelDistance;
@@ -380,11 +385,14 @@ void UPhaseCrashComponent::StartGroundDash()
 		TravelDistance / FMath::Max(GroundDashSpeed, 1.0f),
 		MinimumFlightDuration);
 	ActiveCooldownDuration = GroundDashCooldown;
+	bUsesGASDashCooldown = true;
+	bUsesGASCrashCooldown = false;
+	MotionType = EPhaseCrashMotionType::GroundDash;
 	bCurrentCrashRefreshesOnLanding = false;
 	VerticalVelocity = 0.0f;
 
 	SetCrashState(EPhaseCrashState::Crashing);
-	RDCAAudio::PlayAtLocation(
+	RDCAPresentation::PlayAtLocation(
 		this,
 		ERDCAAudioCue::PlayerDash,
 		OwnerPawn->GetActorLocation(),
@@ -403,6 +411,26 @@ void UPhaseCrashComponent::StartGroundDash()
 		TEXT("Ground dash started. Distance=%.1f Duration=%.2f"),
 		TravelDistance,
 		CrashDuration);
+	return true;
+}
+
+void UPhaseCrashComponent::CancelGroundDashExecution()
+{
+	if (!bUsesGASDashCooldown)
+	{
+		return;
+	}
+	bUsesGASDashCooldown = false;
+	CrashDuration = 0.0f;
+	CrashElapsed = 0.0f;
+	RecoveryRemaining = 0.0f;
+	CooldownRemaining = 0.0f;
+	ActiveCooldownDuration = 0.0f;
+	VerticalVelocity = 0.0f;
+	ClearTemporaryMoveIgnores();
+	ClearBufferedActionInput();
+	MotionType = EPhaseCrashMotionType::None;
+	SetCrashState(EPhaseCrashState::Ready);
 }
 
 void UPhaseCrashComponent::ForceArenaRecovery(
@@ -414,6 +442,19 @@ void UPhaseCrashComponent::ForceArenaRecovery(
 	{
 		return;
 	}
+	if (AbilitySystem)
+	{
+		FGameplayTagContainer Tags;
+		Tags.AddTag(RDCAGameplayTags::Ability_Player_GroundDash);
+		Tags.AddTag(RDCAGameplayTags::Ability_Player_PhaseCrash);
+		AbilitySystem->CancelAbilities(&Tags);
+		AbilitySystem->ClearGroundDashCooldown();
+		AbilitySystem->ClearPhaseCrashCooldown();
+	}
+	bUsesGASDashCooldown = false;
+	bUsesGASCrashCooldown = false;
+	ClearBufferedActionInput();
+	MotionType = EPhaseCrashMotionType::ArenaRecovery;
 
 	if (UPawnMovementComponent* Movement = OwnerPawn->GetMovementComponent())
 	{
@@ -426,8 +467,6 @@ void UPhaseCrashComponent::ForceArenaRecovery(
 	bActiveBossCrash = false;
 	bAimingAtBoss = false;
 	bWeakPointDamageAppliedThisCrash = false;
-	bCrashInputBuffered = false;
-	DashInputBufferRemaining = 0.0f;
 	CrashStart = OwnerPawn->GetActorLocation();
 	CrashEnd = Destination;
 	ActiveArcHeight = FMath::Max(ArcHeight, 0.0f);
@@ -448,29 +487,7 @@ void UPhaseCrashComponent::ForceArenaRecovery(
 		CrashDuration);
 }
 
-void UPhaseCrashComponent::ConsumeBufferedInputs(const float DeltaTime)
-{
-	DashInputBufferRemaining = FMath::Max(
-		DashInputBufferRemaining - DeltaTime,
-		0.0f);
-	const bool bActionAvailable =
-		CrashState == EPhaseCrashState::Ready
-		|| CrashState == EPhaseCrashState::Attached;
-	if (!bActionAvailable)
-	{
-		return;
-	}
 
-	if (bCrashInputBuffered && bCrashInputHeld)
-	{
-		BeginCrashAim();
-		return;
-	}
-	if (DashInputBufferRemaining > 0.0f)
-	{
-		StartGroundDash();
-	}
-}
 
 void UPhaseCrashComponent::MoveAttached(const FVector2D& MovementInput)
 {
@@ -604,6 +621,22 @@ FVector UPhaseCrashComponent::GetAttachedSurfaceNormal() const
 		: FVector::UpVector;
 }
 
+float UPhaseCrashComponent::GetCooldownRemaining() const
+{
+	if (AbilitySystem && CrashState == EPhaseCrashState::Cooldown)
+	{
+		if (bUsesGASDashCooldown) { return AbilitySystem->GetGroundDashCooldownRemaining(); }
+		if (bUsesGASCrashCooldown) { return AbilitySystem->GetPhaseCrashCooldownRemaining(); }
+	}
+	return CooldownRemaining;
+}
+
+bool UPhaseCrashComponent::IsCurrentGASActionOnCooldown() const
+{
+	return AbilitySystem && ((bUsesGASDashCooldown && AbilitySystem->IsGroundDashOnCooldown())
+		|| (bUsesGASCrashCooldown && AbilitySystem->IsPhaseCrashOnCooldown()));
+}
+
 float UPhaseCrashComponent::GetCooldownReadyPercent() const
 {
 	if (CrashState != EPhaseCrashState::Cooldown)
@@ -615,9 +648,10 @@ float UPhaseCrashComponent::GetCooldownReadyPercent() const
 			: 0.0f;
 	}
 
-	const float Duration = FMath::Max(ActiveCooldownDuration, CooldownDuration);
+	const float Duration = bUsesGASDashCooldown ? GetGroundDashCooldownDuration()
+		: bUsesGASCrashCooldown ? GetCrashCooldownDuration() : FMath::Max(ActiveCooldownDuration, CooldownDuration);
 	return Duration > 0.0f
-		? 1.0f - FMath::Clamp(CooldownRemaining / Duration, 0.0f, 1.0f)
+		? 1.0f - FMath::Clamp(GetCooldownRemaining() / Duration, 0.0f, 1.0f)
 		: 1.0f;
 }
 
@@ -643,71 +677,7 @@ float UPhaseCrashComponent::GetMovementInputScale() const
 	}
 }
 
-bool UPhaseCrashComponent::UpdateAimTarget()
-{
-	if (!OwnerPawn)
-	{
-		return false;
-	}
 
-	APlayerController* PlayerController =
-		Cast<APlayerController>(OwnerPawn->GetController());
-	if (!PlayerController)
-	{
-		return false;
-	}
-
-	bAimingAtBoss = false;
-
-	FVector RayOrigin;
-	FVector RayDirection;
-	if (!PlayerController->DeprojectMousePositionToWorld(RayOrigin, RayDirection))
-	{
-		return false;
-	}
-
-	const FVector RayEnd = RayOrigin + RayDirection * 100000.0f;
-	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(PhaseCrashAim), false, OwnerPawn);
-
-	TArray<FHitResult> Hits;
-	if (GetWorld()->LineTraceMultiByChannel(
-		Hits,
-		RayOrigin,
-		RayEnd,
-		ECC_Visibility,
-		QueryParams))
-	{
-		for (const FHitResult& CandidateHit : Hits)
-		{
-			// Decorative environment collision must not pull the landing reticle
-			// off the cursor's ground projection. Combat and attachment targets
-			// remain directly aimable at their real hit point.
-			if (IsDirectCrashAimTarget(CandidateHit))
-			{
-				AimTarget = CandidateHit.ImpactPoint;
-				bAimingAtBoss = bChargingFromAttachment
-					&& IsBossCrashAimTarget(CandidateHit);
-				return true;
-			}
-		}
-	}
-
-	if (FMath::Abs(RayDirection.Z) <= UE_KINDA_SMALL_NUMBER)
-	{
-		return false;
-	}
-
-	const float PlaneZ = GetArenaAimPlaneZ(*GetWorld(), *OwnerPawn);
-	const float DistanceAlongRay = (PlaneZ - RayOrigin.Z) / RayDirection.Z;
-	if (DistanceAlongRay <= 0.0f)
-	{
-		return false;
-	}
-
-	AimTarget = RayOrigin + RayDirection * DistanceAlongRay;
-	AimTarget.Z = PlaneZ;
-	return true;
-}
 
 bool UPhaseCrashComponent::CalculateTrajectory(
 	FVector& OutStart,
@@ -909,6 +879,8 @@ void UPhaseCrashComponent::ApplyGravity(const float DeltaTime)
 			CooldownRemaining = 0.0f;
 			ActiveCooldownDuration = 0.0f;
 			bCurrentCrashRefreshesOnLanding = false;
+			if (AbilitySystem) { AbilitySystem->ClearPhaseCrashCooldown(); }
+			bUsesGASCrashCooldown = false;
 			SetCrashState(EPhaseCrashState::Ready);
 		}
 	}
@@ -919,6 +891,18 @@ void UPhaseCrashComponent::TickRecovery(const float DeltaTime)
 	RecoveryRemaining = FMath::Max(RecoveryRemaining - DeltaTime, 0.0f);
 	if (RecoveryRemaining <= 0.0f)
 	{
+		if (bUsesGASDashCooldown || bUsesGASCrashCooldown)
+		{
+			CooldownRemaining = 0.0f;
+			SetCrashState(EPhaseCrashState::Cooldown);
+			if (!IsCurrentGASActionOnCooldown())
+			{
+				bUsesGASDashCooldown = false;
+				bUsesGASCrashCooldown = false;
+				SetCrashState(EPhaseCrashState::Ready);
+			}
+			return;
+		}
 		CooldownRemaining = ActiveCooldownDuration;
 		SetCrashState(
 			CooldownRemaining > 0.0f
@@ -929,6 +913,16 @@ void UPhaseCrashComponent::TickRecovery(const float DeltaTime)
 
 void UPhaseCrashComponent::TickCooldown(const float DeltaTime)
 {
+	if ((bUsesGASDashCooldown || bUsesGASCrashCooldown) && AbilitySystem)
+	{
+		if (!IsCurrentGASActionOnCooldown())
+		{
+			bUsesGASDashCooldown = false;
+			bUsesGASCrashCooldown = false;
+			SetCrashState(EPhaseCrashState::Ready);
+		}
+		return;
+	}
 	CooldownRemaining = FMath::Max(CooldownRemaining - DeltaTime, 0.0f);
 	if (CooldownRemaining <= 0.0f)
 	{
@@ -943,6 +937,8 @@ void UPhaseCrashComponent::FinishCrash()
 	CrashElapsed = 0.0f;
 	CrashDuration = 0.0f;
 	RecoveryRemaining = RecoveryDuration;
+	MotionType = EPhaseCrashMotionType::None;
+	CooldownRemaining = (bUsesGASDashCooldown || bUsesGASCrashCooldown) ? 0.0f : ActiveCooldownDuration;
 	SetCrashState(
 		RecoveryRemaining > 0.0f
 			? EPhaseCrashState::Recovery
@@ -950,9 +946,11 @@ void UPhaseCrashComponent::FinishCrash()
 
 	if (CrashState == EPhaseCrashState::Cooldown)
 	{
-		CooldownRemaining = CooldownDuration;
-		if (CooldownRemaining <= 0.0f)
+		if (GetCooldownRemaining() <= 0.0f
+			&& !IsCurrentGASActionOnCooldown())
 		{
+			bUsesGASDashCooldown = false;
+			bUsesGASCrashCooldown = false;
 			SetCrashState(EPhaseCrashState::Ready);
 		}
 	}
@@ -1203,13 +1201,14 @@ void UPhaseCrashComponent::HandleReboundImpact(
 	const FVector& IncomingDirection,
 	const UCrashResponseComponent& ResponseComponent)
 {
+	MotionType = EPhaseCrashMotionType::Rebound;
 	bActiveBossCrash = false;
 	ReboundPresentationRemaining = ReboundPresentationDuration;
 	if (TargetActor
 		&& TargetActor->FindComponentByClass<UBossEncounterComponent>()
 		&& !Cast<UBossWeakPointComponent>(Hit.GetComponent()))
 	{
-		RDCAAudio::PlayAtLocation(
+		RDCAPresentation::PlayAtLocation(
 			this,
 			ERDCAAudioCue::BossBodyRebound,
 			Hit.ImpactPoint,
@@ -1638,6 +1637,19 @@ void UPhaseCrashComponent::SetCrashState(const EPhaseCrashState NewState)
 
 	const EPhaseCrashState PreviousState = CrashState;
 	CrashState = NewState;
+	if (NewState == EPhaseCrashState::Attached || NewState == EPhaseCrashState::Ready)
+	{
+		bUsesGASDashCooldown = false;
+		bUsesGASCrashCooldown = false;
+		bCurrentCrashRefreshesOnLanding = false;
+		MotionType = EPhaseCrashMotionType::None;
+	}
+	if (AbilitySystem)
+	{
+		AbilitySystem->SetLooseGameplayTagCount(RDCAGameplayTags::State_Action_Charging,
+			NewState == EPhaseCrashState::Charging ? 1 : 0);
+		AbilitySystem->SetLooseGameplayTagCount(RDCAGameplayTags::State_Movement_Attached, IsAttached() ? 1 : 0);
+	}
 	UE_LOG(
 		LogRDCAPlayer,
 		Log,
@@ -1645,15 +1657,4 @@ void UPhaseCrashComponent::SetCrashState(const EPhaseCrashState NewState)
 		LexToString(PreviousState),
 		LexToString(NewState));
 	OnCrashStateChanged.Broadcast(PreviousState, NewState);
-	if (APlayerController* PlayerController = Cast<APlayerController>(
-		OwnerPawn ? OwnerPawn->GetController() : nullptr))
-	{
-		SetAimCursor(
-			*PlayerController,
-			NewState == EPhaseCrashState::Charging
-				? (bAimingAtBoss
-					? ERDCAAimCursorState::BossTarget
-					: ERDCAAimCursorState::Charging)
-				: ERDCAAimCursorState::Normal);
-	}
 }

@@ -15,6 +15,10 @@ public class rdca : ModuleRules
 			"Engine",
 			"InputCore",
 			"EnhancedInput",
+			"GameplayAbilities",
+			"GameplayTags",
+			"GameplayTasks",
+			"AIModule",
 			"UMG",
 			"Niagara",
 			"ProceduralMeshComponent"

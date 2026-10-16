@@ -11,5 +11,6 @@ public class rdcaEditorTarget : TargetRules
 		DefaultBuildSettings = BuildSettingsVersion.V4;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_3;
 		ExtraModuleNames.Add("rdca");
+		ExtraModuleNames.Add("rdcaEditor");
 	}
 }

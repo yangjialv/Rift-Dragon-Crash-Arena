@@ -5,6 +5,9 @@
 #include "BossEncounterComponent.generated.h"
 
 class UBossWeakPointComponent;
+class URDCAAbilitySystemComponent;
+class URDCABossAttackAbility;
+class UBossAttackPolicyComponent;
 class UMaterialInterface;
 class USceneComponent;
 class UStaticMeshComponent;
@@ -120,6 +123,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(
@@ -171,6 +175,38 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "Boss|Encounter")
 	FOnBossEncounterStateChanged OnEncounterStateChanged;
+
+	UFUNCTION(BlueprintPure, Category = "Boss|Encounter")
+	EBossBarragePattern GetCurrentBarragePattern() const { return ActiveBarragePattern; }
+
+	UFUNCTION(BlueprintPure, Category = "Boss|Encounter")
+	int32 GetCompletedAttackCount() const { return CompletedAttacksSinceExposure; }
+
+	// Runtime ownership: exactly one brain may advance decision states.
+	bool ClaimDecisionControl(UObject* Driver);
+	void ReleaseDecisionControl(UObject* Driver, bool bResumeLegacy = false);
+	bool IsDecisionControlledBy(const UObject* Driver) const;
+	UFUNCTION(BlueprintPure, Category = "Boss|AI")
+	bool IsBehaviorTreeDriven() const;
+	bool IsEncounterStopped() const { return bEncounterStopped || EncounterState == EBossEncounterState::Dead; }
+	bool IsExecutingAttack() const { return ActiveAttackAbility != nullptr; }
+	bool AdvanceDecisionWindow(UObject* Driver);
+	bool SelectAttackForAI(UObject* Driver, EBossCombatPhase ExpectedPhase);
+	uint64 ExecuteAttackForAI(UObject* Driver);
+	void CancelAttackForAI(UObject* Driver, uint64 ExecutionId);
+	uint64 GetAttackExecutionId() const { return AttackExecutionId; }
+	uint64 GetLastFinishedAttackId() const { return LastFinishedAttackId; }
+	bool WasLastAttackCancelled() const { return bLastAttackCancelled; }
+	DECLARE_MULTICAST_DELEGATE(FOnDecisionContextChanged);
+	FOnDecisionContextChanged OnDecisionContextChanged;
+	DECLARE_MULTICAST_DELEGATE_TwoParams(FOnAttackFinished, uint64, bool);
+	FOnAttackFinished OnAttackFinished;
+	DECLARE_MULTICAST_DELEGATE(FOnDecisionWindowReady);
+	FOnDecisionWindowReady OnDecisionWindowReady;
+	void SetAITarget(UObject* Driver, APawn* Target);
+	APawn* GetAttackTargetPawn() const;
+	bool HasAttackPlan() const { return bAISelectionReady; }
+	float GetNextActionTime() const { return StateDeadline; }
 
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Boss|Encounter|Timing",
@@ -582,8 +618,18 @@ protected:
 	bool bUseSphereMaskedBossPhaseTransition = false;
 
 private:
+	friend class UBossAttackPolicyComponent;
+	friend class URDCABossAttackAbility;
+	friend class URDCABossBarrageAbility;
+	friend class URDCABossShockwaveAbility;
+	friend class URDCABossLaserAbility;
+	bool ActivateSelectedAttackAbility();
+	void CancelActiveAttackAbility();
+	void HandleAttackAbilityEnded(bool bWasCancelled);
 	void SetEncounterState(EBossEncounterState NewState);
 	void SelectNextAttack();
+	void ChooseNextAttack();
+	bool AdvanceDecisionWindowInternal();
 	EBossAttackType ChooseWeightedAttack(
 		const FBossAttackWeights& Weights);
 	EPlayerSpatialState ObservePlayerSpatialState() const;
@@ -592,9 +638,13 @@ private:
 	float GetCurrentAttackWarningDuration() const;
 	float GetCurrentAttackActiveDuration() const;
 	bool IsEnhancedDoubleShockwaveAttack() const;
-	void BeginCurrentAttackWarning();
-	void BeginCurrentAttack();
-	void FinishCurrentAttack();
+	// Compatibility execution backend: saved Blueprint settings stay on this component.
+	void BeginShockwaveWarning();
+	void BeginBarrageWarning();
+	void BeginLaserWarning();
+	void BeginShockwaveAttack();
+	void BeginLaserAttack();
+	void FinishAttackExecution(bool bCompleted);
 	void TickShockwaveAttack();
 	void BeginSecondShockwavePulse();
 	void UpdateShockwave(float NormalizedTime);
@@ -690,6 +740,13 @@ private:
 	FVector GetShockwaveOriginLocation() const;
 
 	TWeakObjectPtr<UStaticMeshComponent> ShockwaveVisual;
+	UPROPERTY(Transient)
+	TObjectPtr<URDCAAbilitySystemComponent> AbilitySystem;
+	UPROPERTY(Transient)
+	TObjectPtr<URDCABossAttackAbility> ActiveAttackAbility;
+	UPROPERTY(Transient)
+	TObjectPtr<UBossAttackPolicyComponent> AttackPolicy;
+	TWeakObjectPtr<APawn> AITarget;
 	TWeakObjectPtr<UStaticMeshComponent> WeakPointVisual;
 	TWeakObjectPtr<UBossWeakPointComponent> WeakPoint;
 	TWeakObjectPtr<UMeshComponent> BossVisual;
@@ -737,6 +794,16 @@ private:
 	EBossCombatPhase LastAppliedBossMaterialPhase = EBossCombatPhase::Dead;
 	bool bEncounterStopped = false;
 	bool bIntroHold = false;
+	enum class EDecisionDriver : uint8 { Legacy, BehaviorTree, Suspended };
+	EDecisionDriver DecisionDriver = EDecisionDriver::Legacy;
+	TWeakObjectPtr<UObject> DecisionOwner;
+	bool bAISelectionReady = false;
+	uint64 AttackExecutionId = 0;
+	uint64 LastFinishedAttackId = 0;
+	bool bLastAttackCancelled = false;
+	float StateEnteredTime = 0.0f;
+	float StateDeadline = 0.0f;
+	bool bDecisionWindowNotified = false;
 	int32 CompletedAttacksSinceExposure = 0;
 	EBossBarragePattern ActiveBarragePattern =
 		EBossBarragePattern::PredictiveVolley;

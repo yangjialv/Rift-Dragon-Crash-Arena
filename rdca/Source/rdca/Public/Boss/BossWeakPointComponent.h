@@ -6,6 +6,8 @@
 #include "BossWeakPointComponent.generated.h"
 
 class APawn;
+class URDCAAbilitySystemComponent;
+struct FOnAttributeChangeData;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	FOnBossHitPointsChanged,
@@ -40,6 +42,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
 	UFUNCTION(BlueprintCallable, Category = "Boss|Weak Point")
@@ -52,19 +55,19 @@ public:
 	bool IsExposed() const { return bExposed; }
 
 	UFUNCTION(BlueprintPure, Category = "Boss|Weak Point")
-	bool IsBossDefeated() const { return CurrentHitPoints <= 0; }
+	bool IsBossDefeated() const { return GetCurrentHitPoints() <= 0; }
 
 	UFUNCTION(BlueprintPure, Category = "Boss|Weak Point")
-	int32 GetCurrentHitPoints() const { return CurrentHitPoints; }
+	int32 GetCurrentHitPoints() const;
 
 	UFUNCTION(BlueprintPure, Category = "Boss|Weak Point")
-	int32 GetMaximumHitPoints() const { return MaximumHitPoints; }
+	int32 GetMaximumHitPoints() const;
 
 	UFUNCTION(BlueprintPure, Category = "Boss|Weak Point")
 	float GetHitPointsPercent() const
 	{
-		return MaximumHitPoints > 0
-			? static_cast<float>(CurrentHitPoints) / MaximumHitPoints
+		return GetMaximumHitPoints() > 0
+			? static_cast<float>(GetCurrentHitPoints()) / GetMaximumHitPoints()
 			: 0.0f;
 	}
 
@@ -100,5 +103,10 @@ protected:
 	float WeakPointImpactVolumeMultiplier = 4.0f;
 
 private:
-	int32 CurrentHitPoints = 5;
+	void InitializeAbilitySystem();
+	void HandleHealthChanged(const FOnAttributeChangeData& Data);
+
+	UPROPERTY(Transient)
+	TObjectPtr<URDCAAbilitySystemComponent> AbilitySystem;
+	bool bResettingHealth = false;
 };

@@ -9,6 +9,12 @@ class APawn;
 class AActor;
 class UCrashResponseComponent;
 class UPrimitiveComponent;
+class URDCAAbilitySystemComponent;
+class URDCAGroundDashAbility;
+class URDCAPhaseCrashAbility;
+class URDCAPlayerControlComponent;
+
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnPhaseCrashMotionUpdated, float);
 
 UENUM(BlueprintType)
 enum class EPhaseCrashState : uint8
@@ -26,6 +32,18 @@ enum class ECrashArcType : uint8
 {
 	LowArc,
 	HighArc
+};
+
+/** Actual travel type, independent of skill lifetime or the height of its trajectory. */
+UENUM(BlueprintType)
+enum class EPhaseCrashMotionType : uint8
+{
+	None,
+	Jump,
+	GroundDash,
+	BossDirect,
+	Rebound,
+	ArenaRecovery
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
@@ -57,8 +75,21 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Phase Crash")
 	void CancelCharging();
 
+	/** Forget pending control intent without changing the current physical motion. */
+	void ClearBufferedActionInput();
+
+	/** Explicit aiming input; release still uses ReleaseCrash and the same GAS skill. */
+	bool RequestCrashChargeAtLocation(const FVector& WorldTarget, const AActor* TargetActor = nullptr);
+	bool CanStartCrashCharge() const;
+	float GetCrashCooldownDuration() const { return FMath::Max(CooldownDuration, 0.0f); }
+
 	UFUNCTION(BlueprintCallable, Category = "Phase Crash")
 	void StartGroundDash();
+
+	/** World-space control intent, also usable by non-mouse callers. No movement before validation. */
+	bool RequestGroundDashAtLocation(const FVector& WorldTarget);
+	bool CanStartGroundDash() const;
+	float GetGroundDashCooldownDuration() const { return FMath::Max(GroundDashCooldown, 0.0f); }
 
 	UFUNCTION(BlueprintPure, Category = "Phase Crash")
 	EPhaseCrashState GetCrashState() const { return CrashState; }
@@ -70,7 +101,7 @@ public:
 	float GetChargeAlpha() const;
 
 	UFUNCTION(BlueprintPure, Category = "Phase Crash")
-	float GetCooldownRemaining() const { return CooldownRemaining; }
+	float GetCooldownRemaining() const;
 
 	UFUNCTION(BlueprintPure, Category = "Phase Crash")
 	float GetCooldownReadyPercent() const;
@@ -101,9 +132,11 @@ public:
 	bool IsGroundDashActive() const
 	{
 		return CrashState == EPhaseCrashState::Crashing
-			&& FMath::IsNearlyZero(ActiveArcHeight)
-			&& !bActiveBossCrash;
+			&& MotionType == EPhaseCrashMotionType::GroundDash;
 	}
+
+	UFUNCTION(BlueprintPure, Category = "Phase Crash")
+	EPhaseCrashMotionType GetMotionType() const { return MotionType; }
 
 	/** True while an attached player is pointing the left-click aim ray at the Boss. */
 	UFUNCTION(BlueprintPure, Category = "Phase Crash|Boss Aim")
@@ -166,9 +199,12 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "Phase Crash")
 	FOnPhaseCrashStateChanged OnCrashStateChanged;
+	/** End-of-motion step: Control can update aim and retry input without a second ticking cache. */
+	FOnPhaseCrashMotionUpdated OnMotionUpdated;
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	/** Time required to reach maximum jump height. Holding longer stays capped. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Phase Crash|Charge",
@@ -265,7 +301,17 @@ protected:
 	float BossCrashSpeed = 5200.0f;
 
 private:
-	bool UpdateAimTarget();
+	friend class URDCAGroundDashAbility;
+	friend class URDCAPhaseCrashAbility;
+	friend class URDCAPlayerControlComponent;
+	bool RequestCrashAim(const FVector& WorldTarget, const AActor* TargetActor, bool bWorldSpaceAim);
+	bool ExecuteCrashAim(const FVector& WorldTarget, const AActor* TargetActor, bool bWorldSpaceAim);
+	bool ExecuteCrashRelease();
+	void CancelCrashExecution();
+	bool IsCurrentGASActionOnCooldown() const;
+	bool ExecuteGroundDash(const FVector& WorldTarget);
+	void CancelGroundDashExecution();
+	bool CanAcceptActionInput() const;
 	bool CalculateTrajectory(
 		FVector& OutStart,
 		FVector& OutEnd,
@@ -300,10 +346,16 @@ private:
 		const FVector& WorldContactPoint,
 		const FVector& WorldImpactNormal);
 	void SetCrashState(EPhaseCrashState NewState);
-	void BeginCrashAim();
-	void ConsumeBufferedInputs(float DeltaTime);
 
 	TObjectPtr<APawn> OwnerPawn;
+	UPROPERTY(Transient)
+	TObjectPtr<URDCAAbilitySystemComponent> AbilitySystem;
+	UPROPERTY(Transient)
+	TObjectPtr<URDCAPlayerControlComponent> PlayerControl;
+	bool bUsesGASDashCooldown = false;
+	bool bUsesGASCrashCooldown = false;
+	TWeakObjectPtr<const AActor> CurrentAimActor;
+	EPhaseCrashMotionType MotionType = EPhaseCrashMotionType::None;
 	TWeakObjectPtr<AActor> AttachedActor;
 	TWeakObjectPtr<UPrimitiveComponent> AttachedSurfaceComponent;
 	TWeakObjectPtr<UCrashResponseComponent> AttachedResponseComponent;
@@ -316,9 +368,6 @@ private:
 	bool bActiveBossCrash = false;
 	bool bWeakPointDamageAppliedThisCrash = false;
 	bool bCurrentCrashRefreshesOnLanding = false;
-	bool bCrashInputHeld = false;
-	bool bCrashInputBuffered = false;
-	float DashInputBufferRemaining = 0.0f;
 	FVector AttachedSurfaceOriginLocal = FVector::ZeroVector;
 	FVector AttachedSurfaceOutLocal = FVector::ForwardVector;
 	FVector AttachedSurfaceUpLocal = FVector::UpVector;

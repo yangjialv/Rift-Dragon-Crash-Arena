@@ -8,9 +8,18 @@
 			"Name": "rdca",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "rdcaEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [
+		{
+			"Name": "GameplayAbilities",
+			"Enabled": true
+		},
 		{
 			"Name": "ProceduralMeshComponent",
 			"Enabled": true

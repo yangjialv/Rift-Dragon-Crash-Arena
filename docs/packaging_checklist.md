@@ -1,5 +1,27 @@
 # Windows Demo 打包与验收
 
+## 当前 GAS / 3C 重构版本
+
+工作分支：`refactor/gas-3c`。GAS 阶段 1～4 已经用户确认正常；
+阶段 5/6 的 3C、Cue 与控制层迁移已获用户确认；标准可视化 Boss AI 已完成，待完整实机验收。
+
+- [x] Editor Development 与 Win64 Shipping 编译链接；
+- [x] 25 组 GAS/3C 自动测试，0 警告、0 失败；
+- [x] Cue 与控制层迁移后，Editor/Shipping 再次编译通过，30 组测试通过；
+- [x] 用户确认 Cue、鼠标投影与预输入迁移后的当前版本正常；
+- [x] 用户确认新 3C 当前版本正常；
+- [x] Boss Pawn 迁移基础 Editor/Shipping 编译、32 组自动测试通过；
+- [x] 用户确认 Boss 改为新 Pawn 父类后正常；
+- [x] 新 AIController/原生行为树 Editor/Shipping 编译，38 组自动测试通过；
+- [x] 标准可视化树版本 Editor/Shipping 编译、42 项测试通过；保存资产重载与原关卡 AI 启动检查通过；
+- [x] `/Game/AI` 已加入 Always Cook，包含正式 BT、BB 和可选控制器蓝图；生成工具位于 Editor-only 模块，不进入 Shipping；
+- [ ] 原关卡完整两阶段、表现、输入和 Restart 实机验收；
+- [ ] 重新 Cook/Stage/Archive；
+- [ ] 新包的独立启动、Restart 与低配机验收。
+
+以下旧版本打包记录不代表本重构分支已重新生成安装包。原蓝图将自动继承三个原生组件，
+不需要为了打包手工添加；保留原动态资源 Cook 和硬件光标 Stage 配置。
+
 ## 当前首包配置
 
 - 平台：Windows 64-bit

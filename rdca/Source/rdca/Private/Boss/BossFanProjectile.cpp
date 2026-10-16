@@ -1,6 +1,6 @@
 #include "Boss/BossFanProjectile.h"
 
-#include "Audio/RDCAAudio.h"
+#include "Abilities/RDCAPresentation.h"
 #include "Arena/AnchorOverloadComponent.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -298,7 +298,7 @@ void ABossFanProjectile::HandleProjectileOverlap(
 	const bool bDamageApplied = Health->ReceiveDamage(Damage);
 	if (bDamageApplied)
 	{
-		RDCAAudio::PlayAtLocation(
+		RDCAPresentation::PlayAtLocation(
 			this,
 			ERDCAAudioCue::BarragePlayerHit,
 			OtherActor->GetActorLocation(),
